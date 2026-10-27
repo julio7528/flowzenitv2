@@ -1,0 +1,109 @@
+.pomodoro-dock {
+  position: fixed;
+  z-index: 40;
+  right: 22px;
+  bottom: 22px;
+  width: max-content;
+  max-width: calc(100vw - 24px);
+  color: var(--color-ivory);
+  font-family: inherit;
+}
+
+.pomodoro-sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
+
+.pomodoro-collapsed {
+  display: flex;
+  min-width: 184px;
+  min-height: 48px;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid #34445a;
+  border-radius: 999px;
+  padding: 0 15px;
+  color: var(--color-ivory);
+  background: var(--color-midnight);
+  box-shadow: 0 8px 26px rgba(10, 13, 27, .2);
+  cursor: pointer;
+  transition: border-color 140ms ease, transform 140ms ease;
+}
+
+.pomodoro-collapsed-group { display: flex; align-items: center; gap: 8px; }
+.pomodoro-collapsed:hover { border-color: var(--color-antique-gold); transform: translateY(-2px); }
+.pomodoro-collapsed-phase { color: #c9d2dd; font-size: 11px; font-weight: 600; white-space: nowrap; }
+.pomodoro-collapsed strong { margin-left: auto; color: var(--color-amber); font-size: 15px; font-variant-numeric: tabular-nums; letter-spacing: .02em; }
+.pomodoro-collapsed > svg { width: 18px; height: 18px; flex: 0 0 auto; fill: none; stroke: #aebbc9; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.5; }
+
+.pomodoro-indicator {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: #7c8795;
+}
+
+.pomodoro-indicator.is-running { background: var(--color-amber); box-shadow: 0 0 0 3px rgba(239, 164, 80, .14); animation: pomodoro-pulse 1.8s ease-out infinite; }
+
+@keyframes pomodoro-pulse {
+  50% { box-shadow: 0 0 0 6px rgba(239, 164, 80, .04); }
+}
+
+.pomodoro-panel {
+  width: min(310px, calc(100vw - 24px));
+  border: 1px solid #34445a;
+  border-radius: 16px;
+  padding: 17px 18px 15px;
+  color: var(--color-ivory);
+  background: var(--color-midnight);
+  box-shadow: 0 16px 44px rgba(10, 13, 27, .28);
+  animation: pomodoro-open 160ms ease-out both;
+}
+
+@keyframes pomodoro-open {
+  from { opacity: .65; transform: translateY(7px) scale(.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.pomodoro-panel-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.pomodoro-panel-title { display: flex; align-items: center; gap: 10px; }
+.pomodoro-panel-title > div { display: grid; gap: 2px; }
+.pomodoro-panel-title strong { color: #fff; font-size: 13px; font-weight: 700; }
+.pomodoro-panel-title span:last-child { color: #aebbc9; font-size: 11px; }
+.pomodoro-close { width: 34px; height: 34px; flex: 0 0 auto; border: 1px solid #435166; border-radius: 9px; color: #d8e0e8; background: transparent; font-size: 22px; line-height: 1; cursor: pointer; }
+.pomodoro-close:hover { border-color: var(--color-amber); color: #fff; }
+.pomodoro-clock { display: flex; align-items: center; justify-content: center; gap: 11px; margin: 14px 0 10px; }
+.pomodoro-clock svg { width: 23px; height: 23px; fill: none; stroke: var(--color-amber); stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.45; }
+.pomodoro-clock > span { color: #fff; font-size: 48px; font-weight: 640; font-variant-numeric: tabular-nums; letter-spacing: -.055em; line-height: 1.05; }
+.pomodoro-progress { height: 4px; overflow: hidden; border-radius: 999px; background: #28364a; }
+.pomodoro-progress > span { display: block; height: 100%; border-radius: inherit; background: var(--color-amber); transition: width 300ms linear; }
+.pomodoro-cycle { margin: 9px 0 14px; color: #aebbc9; font-size: 10px; text-align: center; }
+.pomodoro-controls { display: grid; grid-template-columns: minmax(0, 1fr) 44px; gap: 8px; }
+.pomodoro-main-control,
+.pomodoro-reset-control { min-height: 44px; border-radius: 9px; font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
+.pomodoro-main-control { border: 1px solid var(--color-amber); color: var(--color-midnight); background: var(--color-amber); }
+.pomodoro-main-control:hover { border-color: #f3b86e; background: #f3b86e; }
+.pomodoro-reset-control { display: grid; place-items: center; border: 1px solid #435166; color: #d8e0e8; background: transparent; }
+.pomodoro-reset-control:hover { border-color: var(--color-amber); color: #fff; }
+.pomodoro-reset-control svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.5; }
+.pomodoro-alarm-stop { display: flex; min-height: 44px; align-items: center; justify-content: center; gap: 8px; margin-top: 10px; border: 1px solid #9b2c2c; border-radius: 9px; padding: 0 14px; color: #fff; background: #9b2c2c; font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
+.pomodoro-alarm-stop:hover { border-color: #b63a3a; background: #b63a3a; }
+.pomodoro-alarm-stop.is-compact { min-height: 48px; margin-top: 0; white-space: nowrap; }
+.pomodoro-alarm-stop svg { width: 17px; height: 17px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
+.pomodoro-announcement { min-height: 16px; margin: 10px 0 8px; color: #c5cfda; font-size: 10px; line-height: 1.45; text-align: center; }
+.pomodoro-settings-link { display: flex; min-height: 40px; align-items: center; justify-content: center; gap: 8px; border-top: 1px solid #2a394d; color: #f2c17f; font-size: 11px; font-weight: 620; text-decoration: none; }
+.pomodoro-settings-link:hover { color: #ffd99f; }
+.pomodoro-settings-link svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.4; }
+
+.pomodoro-dock :is(button, a):focus-visible { outline: 3px solid var(--color-amber); outline-offset: 3px; }
+
+@media (max-width: 600px) {
+  .pomodoro-dock { right: 12px; bottom: max(12px, env(safe-area-inset-bottom)); }
+  .pomodoro-collapsed { min-width: 0; min-height: 46px; gap: 8px; padding: 0 12px; }
+  .pomodoro-panel { padding: 15px 15px 12px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pomodoro-collapsed,
+  .pomodoro-progress > span { transition: none; }
+  .pomodoro-indicator.is-running { animation: none; }
+  .pomodoro-panel { animation: none; }
+}
