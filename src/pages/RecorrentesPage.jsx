@@ -3,6 +3,13 @@ import { supabase } from '../lib/supabase.js'
 import PageHeading from '../components/PageHeading.jsx'
 import { useDialogFocus } from '../hooks/useDialogFocus.js'
 import { ErrorState, LoadingState } from '../components/FeedbackState.jsx'
+import {
+  addHoursToTime,
+  formatDurationHoursInput,
+  formatDurationLabel,
+  getDurationHours,
+  getRoutineEndTime,
+} from '../lib/recurringTime.js'
 
 const WEEKDAYS = [
   { value: 1, label: 'Segunda-feira', short: 'Seg' },
@@ -14,7 +21,7 @@ const WEEKDAYS = [
   { value: 7, label: 'Domingo', short: 'Dom' },
 ]
 
-const FIELDS = 'id, demanda, hora, dias_semana, data_inicial, data_final'
+const FIELDS = 'id, demanda, hora, hora_fim, dias_semana, data_inicial, data_final'
 
 function toDateKey(date) {
   const year = date.getFullYear()
@@ -72,6 +79,8 @@ function RecorrentesPage() {
   const [draft, setDraft] = useState({
     demanda: '',
     hora: '09:00',
+    hora_fim: '10:00',
+    duracao_horas: '1',
     dias_semana: [],
     data_inicial: '',
     data_final: '',
@@ -120,6 +129,8 @@ function RecorrentesPage() {
     setDraft({
       demanda: '',
       hora: '09:00',
+      hora_fim: '10:00',
+      duracao_horas: '1',
       dias_semana: [getIsoWeekday(new Date())],
       data_inicial: toDateKey(new Date()),
       data_final: '',
@@ -132,9 +143,13 @@ function RecorrentesPage() {
   function openEdit(item) {
     rememberFocus()
     setEditingItem(item)
+    const endTime = getRoutineEndTime(item)
+    const editableEndTime = endTime === '24:00' ? '23:59' : endTime
     setDraft({
       demanda: item.demanda,
       hora: formatTime(item.hora),
+      hora_fim: editableEndTime,
+      duracao_horas: formatDurationHoursInput(getDurationHours(item.hora, editableEndTime) ?? 1),
       dias_semana: (item.dias_semana ?? []).map(Number).sort((a, b) => a - b),
       data_inicial: item.data_inicial,
       data_final: item.data_final,
@@ -152,7 +167,35 @@ function RecorrentesPage() {
   }
 
   function updateDraft(field, value) {
-    setDraft((current) => ({ ...current, [field]: value }))
+    setDraft((current) => {
+      if (field === 'hora') {
+        const duration = getDurationHours(current.hora, current.hora_fim)
+          ?? (Number(current.duracao_horas) || 1)
+        const nextEnd = addHoursToTime(value, duration)
+        return {
+          ...current,
+          hora: value,
+          hora_fim: nextEnd,
+          duracao_horas: nextEnd ? formatDurationHoursInput(getDurationHours(value, nextEnd)) : current.duracao_horas,
+        }
+      }
+
+      if (field === 'hora_fim') {
+        const duration = getDurationHours(current.hora, value)
+        return {
+          ...current,
+          hora_fim: value,
+          duracao_horas: duration === null ? '' : formatDurationHoursInput(duration),
+        }
+      }
+
+      if (field === 'duracao_horas') {
+        const nextEnd = addHoursToTime(current.hora, value)
+        return { ...current, duracao_horas: value, hora_fim: nextEnd || current.hora_fim }
+      }
+
+      return { ...current, [field]: value }
+    })
     setFormError('')
   }
 
@@ -175,8 +218,15 @@ function RecorrentesPage() {
       setFormError('Informe o nome da demanda recorrente.')
       return
     }
-    if (!draft.hora || !draft.data_inicial || !draft.data_final) {
-      setFormError('Preencha horário e período de recorrência.')
+    if (!draft.hora || !draft.hora_fim || !draft.data_inicial || !draft.data_final) {
+      setFormError('Preencha os horários inicial e final e o período de recorrência.')
+      return
+    }
+    const intervalDuration = getDurationHours(draft.hora, draft.hora_fim)
+    const enteredDuration = Number(draft.duracao_horas)
+    if (!intervalDuration || !Number.isFinite(enteredDuration) || enteredDuration <= 0
+      || Math.round(intervalDuration * 60) !== Math.round(enteredDuration * 60)) {
+      setFormError('A hora final precisa ser posterior à inicial e corresponder à duração informada.')
       return
     }
     if (draft.dias_semana.length === 0) {
@@ -191,6 +241,7 @@ function RecorrentesPage() {
     const changes = {
       demanda,
       hora: draft.hora,
+      hora_fim: draft.hora_fim,
       dias_semana: [...draft.dias_semana].sort((a, b) => a - b),
       data_inicial: draft.data_inicial,
       data_final: draft.data_final,
@@ -307,7 +358,10 @@ function RecorrentesPage() {
                 </div>
                 <div className="recurring-card-time">
                   <ClockIcon />
-                  <span>{formatTime(item.hora)}</span>
+                  <span className="recurring-card-time-copy">
+                    <strong>{formatTime(item.hora)}–{formatTime(getRoutineEndTime(item))}</strong>
+                    <small>{formatDurationLabel(getDurationHours(item.hora, getRoutineEndTime(item)) ?? 1)}</small>
+                  </span>
                 </div>
                 <div className="record-actions">
                   <button
@@ -382,16 +436,43 @@ function RecorrentesPage() {
 
               <div className="recurring-form-row recurring-form-time-row">
                 <div>
-                  <label htmlFor="recurring-time">Horário</label>
+                  <label htmlFor="recurring-time-start">Hora inicial</label>
                   <input
-                    id="recurring-time"
+                    id="recurring-time-start"
                     type="time"
                     value={draft.hora}
                     onChange={(event) => updateDraft('hora', event.target.value)}
                     required
                   />
                 </div>
+                <div>
+                  <label htmlFor="recurring-time-end">Hora final</label>
+                  <input
+                    id="recurring-time-end"
+                    type="time"
+                    value={draft.hora_fim}
+                    onChange={(event) => updateDraft('hora_fim', event.target.value)}
+                    required
+                  />
+                </div>
+                <div>
+                  <label htmlFor="recurring-duration">Duração (horas)</label>
+                  <input
+                    id="recurring-duration"
+                    type="number"
+                    min="0.02"
+                    step="any"
+                    inputMode="decimal"
+                    value={draft.duracao_horas}
+                    onChange={(event) => updateDraft('duracao_horas', event.target.value)}
+                    aria-describedby="recurring-duration-hint"
+                    required
+                  />
+                </div>
               </div>
+              <p className="recurring-time-hint" id="recurring-duration-hint">
+                Ajuste a duração em horas ou informe o horário final; os campos permanecem sincronizados.
+              </p>
 
               <fieldset className="recurring-weekday-fieldset">
                 <legend>Repetir toda semana em</legend>

@@ -5,6 +5,7 @@ import { useDailyDate } from '../hooks/useDailyDate.js'
 import PageHeading from '../components/PageHeading.jsx'
 import { ErrorState, LoadingState } from '../components/FeedbackState.jsx'
 import { isSameCalendarWeek } from '../lib/calendarWeek.js'
+import { getRoutineEndTime } from '../lib/recurringTime.js'
 
 const STATUS_COLUMNS = [
   { value: 'Backlog', label: 'Backlog', className: 'kanban-column-backlog' },
@@ -26,12 +27,6 @@ function timeToMinutes(value) {
   return hours * 60 + minutes
 }
 
-function minutesToTime(minutes) {
-  if (minutes >= 24 * 60) return '24:00'
-  const safeMinutes = Math.max(0, minutes)
-  return `${String(Math.floor(safeMinutes / 60)).padStart(2, '0')}:${String(safeMinutes % 60).padStart(2, '0')}`
-}
-
 function getIsoWeekday(date) {
   return ((date.getDay() + 6) % 7) + 1
 }
@@ -48,13 +43,14 @@ function buildGanttRows(dayItems, routines) {
 
   const routineRows = routines.map((routine) => {
     const start = timeToMinutes(routine.hora)
+    const endTime = getRoutineEndTime(routine)
     return {
       ...routine,
       isRoutine: true,
       hora_inicio: routine.hora,
-      hora_fim: start === null ? '' : minutesToTime(Math.min(24 * 60, start + 60)),
+      hora_fim: endTime,
       start,
-      end: start === null ? null : Math.min(24 * 60, start + 60),
+      end: timeToMinutes(endTime),
     }
   })
 
@@ -261,7 +257,7 @@ function KanbanPage() {
 
       const { data, error } = await supabase
         .from('recorrente')
-        .select('id, demanda, hora, dias_semana, data_inicial, data_final')
+        .select('id, demanda, hora, hora_fim, dias_semana, data_inicial, data_final')
         .contains('dias_semana', [getIsoWeekday(selectedDate)])
         .lte('data_inicial', selectedDateKey)
         .gte('data_final', selectedDateKey)

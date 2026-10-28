@@ -3915,6 +3915,23 @@
   stroke-width: 1.7;
 }
 
+.recurring-card-time-copy {
+  display: grid;
+  gap: 2px;
+}
+
+.recurring-card-time-copy strong {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.recurring-card-time-copy small {
+  color: #78867d;
+  font-size: 10px;
+  font-weight: 550;
+  text-align: right;
+}
+
 .recurring-dialog {
   width: min(100%, 560px);
 }
@@ -3930,7 +3947,14 @@
 }
 
 .recurring-form-time-row {
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.recurring-time-hint {
+  margin: 6px 0 0;
+  color: #78867d;
+  font-size: 10px;
+  line-height: 1.5;
 }
 
 .recurring-form-row > div {

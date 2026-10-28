@@ -3,6 +3,7 @@ import { Link } from 'react-router'
 import { supabase } from '../lib/supabase.js'
 import StatusBadge from '../components/StatusBadge.jsx'
 import { ErrorState, LoadingState } from '../components/FeedbackState.jsx'
+import { getRoutineEndTime } from '../lib/recurringTime.js'
 import './InicioPage.css'
 
 const STATUS_ORDER = ['Backlog', 'Analise', 'Executando', 'Aguardando', 'Done']
@@ -18,13 +19,6 @@ function getIsoWeekday(date) {
 
 function formatTime(value) {
   return value ? String(value).slice(0, 5) : 'Horário não definido'
-}
-
-function addOneHour(value) {
-  const [hour, minute] = String(value ?? '00:00').slice(0, 5).split(':').map(Number)
-  const total = Math.min(24 * 60, hour * 60 + minute + 60)
-  if (total === 24 * 60) return '24:00'
-  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
 }
 
 function getDateLabel(date) {
@@ -75,7 +69,7 @@ function InicioPage() {
           .order('id', { ascending: true }),
         supabase
           .from('recorrente')
-          .select('id, demanda, hora, dias_semana, data_inicial, data_final')
+          .select('id, demanda, hora, hora_fim, dias_semana, data_inicial, data_final')
           .order('hora', { ascending: true }),
       ])
 
@@ -133,7 +127,7 @@ function InicioPage() {
         id: `routine-${item.id}`,
         name: item.demanda,
         start: item.hora,
-        end: addOneHour(item.hora),
+        end: getRoutineEndTime(item),
         type: 'Rotina',
       }))
 

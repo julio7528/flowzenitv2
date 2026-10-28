@@ -7,6 +7,7 @@ import StatusBadge from '../components/StatusBadge.jsx'
 import { useDialogFocus } from '../hooks/useDialogFocus.js'
 import { getIntervalError, layoutScheduledItems, timeToMinutes } from '../lib/dailyTimeline.js'
 import { isSameCalendarWeek } from '../lib/calendarWeek.js'
+import { getRoutineEndTime } from '../lib/recurringTime.js'
 import {
   cancelScheduledDailyTaskAlarm,
   clearDailyTaskAlarms,
@@ -266,7 +267,7 @@ function PlanejamentoDiarioPage() {
 
       const { data, error } = await supabase
         .from('recorrente')
-        .select('id, demanda, hora, dias_semana, data_inicial, data_final')
+        .select('id, demanda, hora, hora_fim, dias_semana, data_inicial, data_final')
         .contains('dias_semana', [getIsoWeekday(selectedDate)])
         .lte('data_inicial', selectedDateKey)
         .gte('data_final', selectedDateKey)
@@ -353,13 +354,11 @@ function PlanejamentoDiarioPage() {
   }, [routineLoading, routines, selectedDate, selectedDateKey])
 
   const routineTimelineItems = useMemo(() => dayRoutines.map((routine) => {
-    const start = timeToMinutes(routine.hora) ?? 0
-    const end = Math.min(24 * 60, start + 60)
     return {
       ...routine,
       isRoutine: true,
       hora_inicio: routine.hora,
-      hora_fim: end === 24 * 60 ? '24:00' : minutesToTime(end),
+      hora_fim: getRoutineEndTime(routine),
     }
   }), [dayRoutines])
 
