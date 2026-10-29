@@ -1,6 +1,6 @@
 # Quickstart de validação — SPEC-004
 
-**SPEC Version**: 2 (proposta para revisão)
+**SPEC Version**: 2
 
 Este guia descreve verificações futuras após implementação autorizada. Não executa consultas nem altera banco neste trabalho documental.
 
@@ -8,8 +8,9 @@ Este guia descreve verificações futuras após implementação autorizada. Não
 
 - Executar somente a versão exata de SPEC-004 incluída em lote aprovado e admitido por `$sdd-run`.
 - Manter consultas privadas indisponíveis em runtime até o gate DEC-001 estar aprovado, implementado e verificado.
-- Usar fixtures sintéticas e alvo isolado não produtivo para testes de integração; não alterar dados, grants, RLS, schema ou policies existentes.
-- A integração de contrato de banco deve chamar o repositório diretamente contra um alvo isolado com dados sintéticos. Ela não pode abrir o gate do serviço nem acessar o banco de produto. Usar credenciais específicas desse alvo, fora do repositório; nunca reutilizar `.env.local` ou credenciais de produção.
+- Unit tests usam doubles e fixtures em memória. Exceção autorizada somente para T025: fixtures sintéticas temporárias no Supabase de desenvolvimento FlowZenit V2 existente, projeto `flowzenithv2` (`twikxeloeftczwbpjvzr`). Não exigir Docker Desktop nem projeto Supabase adicional.
+- Essa exceção não autoriza acesso a dados privados por serviço ou endpoint. Não alterar schema, migrations, grants, RLS, policies, nem registros preexistentes; não reutilizar credenciais privilegiadas como identidade do proprietário.
+- Nunca imprimir credenciais ou valores privados. O Supabase URL/ref pode ser verificado sem imprimir qualquer key; evidências registram somente resultados, IDs sintéticos e relações necessárias.
 - Não instalar dependências. Usar JavaScript ESM, Node `node:test`, doubles e `@supabase/supabase-js` já instalado.
 
 ## Verificações previstas
@@ -19,11 +20,20 @@ Este guia descreve verificações futuras após implementação autorizada. Não
 3. Validar IDs decimais com fixture superior ao intervalo seguro de JavaScript e confirmar que o cast/projeção não os converte em `Number` arredondado.
 4. Testar data diária e semana que cruzem mês/ano, início de semana na segunda-feira, faixa semanal de sete datas e limites inclusivos de rotina em `America/Cuiaba`.
 5. Confirmar que subtarefas em horários sobrepostos permanecem presentes, que subtarefa não aparece como cartão semanal, e que rotina não vira ocorrência persistida.
-6. Exercitar busca com `%`, `_`, acentos, caixa, nenhum resultado e múltiplos candidatos; nenhum valor pode virar SQL, filtro arbitrário ou seleção silenciosa.
-7. Testar o serviço com Supabase double e confirmar por spy que o gate fechado impede qualquer chamada ao repositório. Separadamente, testar a projeção `bigint` chamando o repositório contra alvo isolado com fixtures sintéticas. A integração de banco não autoriza leituras via endpoint.
+6. Exercitar `ILIKE` via PostgREST com caixa, acento, percent, underscore, barra invertida, vazio e múltiplos candidatos. Percent, underscore e barra invertida devem ser escapados literalmente. Acentos permanecem significativos; não exigir equivalência NFC/NFD nem full case-folding além do comportamento observado/documentado da collation.
+7. Testar o serviço com Supabase double e confirmar por spy que o gate fechado impede qualquer chamada ao repositório. Separadamente, testar projeções `bigint` e filtros diretamente no repositório com fixtures sintéticas temporárias no projeto autorizado; não chamar endpoints do agente.
 8. Registrar cada gate como PASS/FAIL/NOT VERIFIED no SDD run autorizado; nenhuma falha não executada é inferida como sucesso.
 
-O gate de banco é obrigatório. Se não houver alvo isolado e verificável, registrar bloqueio/`NOT VERIFIED` e não concluir a SPEC; nunca reclassificar o gate como `NOT APPLICABLE` nem substituir o alvo por produção.
+## Preflight e ciclo de vida das fixtures de T025
+
+1. Confirmar que a conexão aponta exatamente para o projeto de desenvolvimento `twikxeloeftczwbpjvzr`, PostgreSQL 17.x; se o alvo divergir, interromper antes de consultar ou escrever.
+2. Verificar em leitura os tipos/colunas, relações, constraints, triggers, collation de `public.demandas.demanda`, e permissões existentes necessárias à fixture. Não alterar permissões, RLS, schema ou grants.
+3. Generate a unique synthetic run marker and a candidate bigint ID above `Number.MAX_SAFE_INTEGER`. Verify only the exact marker and candidate ID for collisions; do not scan or export existing records. If the schema or current permissions do not safely permit the synthetic high-ID fixture, stop T025 and report the limitation.
+4. Antes de inserir, garantir que fixture possa ser capturada e limpa. Criar somente registros sintéticos necessários; capturar imediatamente cada ID decimal retornado e cada parent ID em um manifesto de teste sem segredos. Registrar somente IDs sintéticos, relações pai-filho e estado final da limpeza como evidência T025 do run SDD.
+5. Preferir transação com rollback quando a conexão de teste permitir. Chamadas PostgREST não são transacionais em conjunto; nesse caso, executar cleanup em `finally`, usando exclusivamente IDs capturados e ordem child-first (subtarefas, tarefas, demandas; rotina pelo próprio ID).
+6. Verificar remoção apenas pelos IDs da fixture. Se não for possível provar a abrangência de escrita/limpeza, parar essa operação e reportar IDs/relacionamentos sintéticos e alternativa segura. Não tentar limpeza ampla.
+
+O gate de banco segue obrigatório. Se o preflight não confirmar projeto, schema, permissão e limpeza seletiva, o teste T025 não passa e a SPEC não pode ser concluída; não reclassificar o gate como `NOT APPLICABLE`.
 
 ## Conclusão
 

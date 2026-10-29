@@ -26,11 +26,14 @@
 - Creating an independent appointment/commitment/calendar entity in this first version.
 - Treating display numbering as a database ID or treating a routine template as a persisted occurrence.
 
+Test harnesses may temporarily insert and remove synthetic records only for the approved SPEC-004@2 contract tests on the FlowZenit V2 development Supabase project `flowzenithv2` (`twikxeloeftczwbpjvzr`). This test-only exception adds no runtime write capability and permits no edits to preexisting records.
+
 ## Contracts and Constraints
 
 - **Existing contracts**: Current domain is public.demandas with type 1/2/3 and parent ID raizid, daily and weekly allocation in data_exec, local time fields, and a separate recurring table. Preserve observed ordering and status derivation. DEC-002 approves using only these existing entities; no independent appointment entity is part of this version. Date filters and schedule summaries use the civil-date interpretation supplied under America/Cuiaba by SPEC-007; existing date/time values are not shifted through UTC conversions.
 - **Compatibility**: Read APIs are additive and do not change product schema, ordering, status calculation, or schedule rules.
 - **Security and data handling**: The read repository accepts a narrowly injected server-side Supabase client from its eventual runtime integration; SPEC-001 provides the fail-closed access gate and safe error/logging modules, but does not provide a server Supabase client, route, or enabled private capability. The current gate remains closed and does not invoke protected operations. Existing anonymous grants do not authorize private-data access through an agent endpoint. User/model input may select supported filters but cannot supply SQL or arbitrary table/column names.
+- **Approved local query parameters**: `pageSize` defaults to 50 and is capped at 100; search text is at most 200 Unicode code points; an inclusive civil date range is capped at 366 days. Text search is a literal, accent-sensitive, case-insensitive substring on `demanda`. `%`, `_`, and the escape character are literal user input, not pattern syntax. No Unicode normalization is promised; case behavior follows the current PostgreSQL column/database collation and must pass the contract tests without changing schema or collation.
 - **Dependencies**: [SPEC-001].
 
 ## User Scenarios & Testing
@@ -86,7 +89,7 @@ The application user asks which routine templates apply on a day and can disting
 ### Functional Requirements
 
 - **FR-001**: Read tools MUST expose named, typed query operations for hierarchy, single-record lookup, status, daily schedule, weekly allocation, recurring routine templates, and text/status/date filters.
-- **FR-002**: Each query MUST validate type, date range, status enum, pagination, and text length against explicit bounded input rules.
+- **FR-002**: Each query MUST validate type, date range, status enum, pagination, and text length against these bounded rules: default `pageSize=50`, maximum `pageSize=100`, maximum text length 200 Unicode code points, and maximum inclusive civil date span of 366 days.
 - **FR-003**: A hierarchy result MUST include persistent IDs, entity type, parent reference, entity name, current status and whether status is stored or derived.
 - **FR-004**: Hierarchical display numbers MUST be explicitly labeled as display-only and MUST never replace persistent IDs.
 - **FR-005**: Daily schedule results MUST include only the currently supported daily entities, their local start/end times, status, and hierarchy context.
@@ -126,7 +129,7 @@ The application user asks which routine templates apply on a day and can disting
 | Lint/static checks | Yes | Project lint command | No new violations |
 | Build/type check | Yes | Project production build | Read tool contracts compile in server boundary |
 | Unit/integration tests | Yes | Synthetic domain query fixtures | Hierarchy, filters, date ranges, ambiguity |
-| Database/contract tests | Yes | Isolated Supabase target using existing grants | Synthetic fixtures only; unknown-ID outcomes are stable and agent reads fail closed until the SPEC-001 access-control gate is satisfied; no new RLS policy is assumed |
+| Database/contract tests | Yes | Existing owner-authorized FlowZenit V2 development Supabase project; verify project/schema/permissions/marker before writes; synthetic fixtures only | Verify exact bigint text projection, filters, escaped literal patterns, accent distinction, and relationships. Record generated IDs/parent links; prefer transactional rollback or delete only captured fixture IDs child-first. No preexisting record changes, broad DELETE/TRUNCATE/reset, new policy/grant, or agent-endpoint access. |
 | Agent-tool integration/security tests | Yes | Internal service tests with doubles and isolated synthetic data | Empty, overlap, truncation, non-disclosure, and zero repository calls while the access gate is closed |
 | Browser E2E/accessibility | Conditional | Only if an approved implementation changes visible UI | Relevant browser flow and accessibility evidence; no UI change is in this SPEC |
 

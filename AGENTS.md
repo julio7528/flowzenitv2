@@ -10,7 +10,7 @@
 - Do not execute approval, limit-extension, or resume RPCs through the runner credential. These actions use the privileged Supabase SQL channel after explicit user authorization.
 - Enforce the 5-attempt and 120-minute-per-SPEC correction limits. Count overlapping correction windows once, preserve counters across sessions, and pause the entire batch at either limit.
 - Never place credentials, tokens, chat transcripts, or private prompts in SPEC snapshots, checkpoints, audit details, CLI output, or source control.
-- Use isolated database tests. Do not alter existing FlowZenit data, production behavior, Supabase migrations outside the approved SPEC, or deployment settings.
+- Use physically isolated database tests by default. The only current exception is owner-authorized synthetic fixture testing for SPEC-004@2 against the existing FlowZenit V2 development Supabase project `flowzenithv2` (`twikxeloeftczwbpjvzr`). Before test writes, verify the exact project, schema, permissions, and absence of the run-specific fixture marker. Use synthetic records only, record created IDs and parent relationships, prefer rollback, and otherwise clean up only captured IDs in dependency order. Preserve all preexisting records and never use agent endpoints for these direct contract tests. This scoped exception does not change the default for other SPECs. Do not alter production behavior, migrations, grants/RLS, or deployment settings.
 - Run the applicable lint, build, unit, integration, security, and acceptance checks. Report commands and real results; do not infer a pass.
 - Do not commit, push, merge, deploy, reset, or discard user changes. The user performs version-control publication manually.
 

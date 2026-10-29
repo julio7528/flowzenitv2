@@ -7,7 +7,7 @@
 - Operações são nomeadas e têm DTOs validados em runtime JavaScript; o modelo não escolhe tabela, coluna, SQL, operador, expressão PostgREST ou ordenação.
 - Datas de entrada são `YYYY-MM-DD` civil já resolvidas. O contrato não interpreta linguagem natural; `America/Cuiaba` e `SPEC-007` governam a resolução externa.
 - IDs de entrada/saída são strings decimais; valores `bigint` devem ser projetados como texto antes de qualquer coerção a `Number`.
-- Aplicar filtros suportados com AND, projeção mínima de colunas, ordenação estável com ID como desempate e limites. Valores propostos de início: `pageSize=50`, máximo 100; texto até 200 code points; intervalo máximo de datas de 366 dias. São valores propostos e exigem revisão do usuário antes da implementação.
+- Aplicar filtros suportados com AND, projeção mínima de colunas, ordenação determinística com ID persistente como desempate e limites aprovados localmente: `pageSize=50` por padrão/máximo 100; texto até 200 Unicode code points; faixa civil inclusiva até 366 dias. Estes parâmetros não aprovam limites globais da DEC-012.
 - Cursores são opacos para o consumidor, vinculados ao hash dos filtros e ordenação. Paginação não promete snapshot transacional se a base mudar entre páginas.
 - Supabase `error` não é confundido com `data=[]`; erros internos não incluem query, chave, stack ou payload privado na resposta ao modelo. Cada item retornado carrega `sourceRef` estável formado pelo tipo de registro e ID persistente.
 
@@ -31,8 +31,8 @@ Retorna um único item existente com os campos permitidos. ID inválido é `INVA
 
 - `kinds` limita a `demand|task|subtask`; `statuses` valida os enums existentes por tipo: subtarefa `Backlog|Analise|Executando|Aguardando|Done`; demanda/tarefa `Backlog|Em andamento|Done`.
 - `dateFrom`/`dateTo` são inclusivos e civis; quando ambos informados, o início não excede o fim e a faixa observa o limite configurado.
-- Busca textual proposta é substring literal sem distinção de caixa sobre `demanda`, com caracteres de padrão escapados; não é busca fuzzy/semântica.
-- Locale de comparação, sensibilidade a acentos e normalização Unicode não estão definidos por esta proposta e precisam ser esclarecidos antes de fixar resultados de busca.
+- Busca textual é substring literal case-insensitive e accent-sensitive sobre `demanda`, via Supabase/PostgREST `ilike`/PostgreSQL `ILIKE`. Escapar `%`, `_` e `\` conforme o escape padrão de pattern matching do PostgreSQL; esses caracteres fornecidos pelo usuário são literais, não curingas.
+- `ILIKE` segue a locale/collation ativa. T025 deve verificar a collation existente, comprovar distinção entre acentuado e não acentuado, e confirmar que pattern matching é suportado sem alteração de schema. Não aplicar `unaccent`, criar collation/extensão, normalizar Unicode ou prometer equivalência NFC/NFD/full case-folding.
 - Resultados múltiplos permanecem candidatos separados; a ferramenta não escolhe silenciosamente. O chamador pede mais contexto quando necessário.
 - Busca semântica/lexical híbrida/RRF é responsabilidade de SPEC-008/009, não desta operação.
 
@@ -83,10 +83,12 @@ Retorna template se o dia ISO da data está em `dias_semana` e `data_inicial <= 
 - Dia/semana usam data civil, segunda-feira inicial, limite semanal exclusivo seguinte, horários sem offset e `America/Cuiaba` sem conversão UTC.
 - Overlaps retornam ambos os itens; rotina respeita weekday ISO e limites inclusivos.
 - Paginação sinaliza truncamento, cursor e ordenação; erro necessário não vira lista vazia nem resultado completo.
-- Gate fechado impede chamadas privadas; testes integrados usam apenas alvo isolado com dados sintéticos.
+- Testes integrados verificam escape literal de `%`, `_` e `\`, case-insensitivity local e distinção de acentos; formas Unicode compostas/decompostas não têm equivalência garantida.
+- Gate fechado impede chamadas privadas pelo serviço; T025 usa apenas fixtures sintéticas temporárias no projeto de desenvolvimento autorizado, com preflight e rollback ou cleanup exato por IDs capturados.
 
 ## Fronteira de integração e segurança
 
 - O repositório recebe um cliente Supabase server-side estreito por injeção; sua criação pertence à integração do runtime e não à SPEC-004. SPEC-001 não fornece um cliente server-side.
 - Antes do repositório, o serviço consulta o gate `withAgentAccess()` de SPEC-001. Na implementação atualmente concluída, o gate sempre nega e não chama a operação protegida. Nenhum request, variável de ambiente ou fixture de teste pode alterar esse resultado.
-- O contrato de banco testa diretamente o repositório somente contra um alvo isolado e sintético; isso não habilita uma leitura pelo serviço ou endpoint nem concede autorização sobre dados de produto.
+- T025 pode testar diretamente o repositório no projeto Supabase de desenvolvimento existente, exclusivamente com registros sintéticos identificados por um marcador único do run. Registrar IDs e relações, preferir transação/rollback e, se PostgREST exigir registros persistidos, remover somente IDs capturados em ordem child-first. Nunca usar DELETE amplo, TRUNCATE, DROP, reset, nem alterar registro preexistente. Se o escopo ou cleanup não for seguro, interromper aquela operação e reportar a alternativa.
+- Essa exceção é exclusiva de SPEC-004@2 e não habilita leituras pelo serviço ou endpoint, nem muda o gate DEC-001. Demais SPECs continuam sob o padrão de teste isolado definido em AGENTS.md.

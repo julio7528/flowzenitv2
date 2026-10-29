@@ -1,7 +1,7 @@
 # Research: SPEC-004 domain contracts and read tools
 
-**Data:** 2026-10-28  
-**Estado:** evidência para o planejamento candidato SPEC-004@2; nenhuma decisão aprovada é alterada.
+**Data:** 2026-10-29
+**Estado:** evidência para SPEC-004@2. Parâmetros locais aprovados pelo proprietário em 2026-10-29; não alteram DEC-012 nem decisões globais.
 
 ## Baseline observado no checkout
 
@@ -16,6 +16,7 @@
 - `id` e `raizid` são `bigint`; convertê-los primeiro para JavaScript `Number` pode perder precisão. O contrato de leitura recomenda IDs decimais em string e validação de round-trip, usando projeção/cast textual suportado pelo PostgREST ou alternativa exata verificada, sem migração.
 - O cliente instalado é `@supabase/supabase-js` 2.118.0. O projeto está em JavaScript ESM; não há TypeScript, Zod ou biblioteca de datas no `package.json`. Não se propõe instalar dependências nem converter o projeto para TypeScript.
 - A implementação concluída da SPEC-001 fornece `server/security/accessGate.js`, erros de API e contexto de log seguro. O gate retorna sempre fechado e não invoca sua callback; não existe cliente Supabase server-side ou endpoint fornecido pela SPEC-001. A integração futura injeta um cliente estreito no repositório sem alterar esse gate.
+- O proprietário autorizou os testes sintéticos de contrato desta SPEC no projeto Supabase de desenvolvimento existente `flowzenithv2` (`twikxeloeftczwbpjvzr`), PostgreSQL 17.11. Esta revisão não leu linhas das tabelas de produto, não verificou permissões/collation do domínio e não criou fixtures; esses passos são preflight obrigatório de T025.
 
 ## Opções técnicas
 
@@ -25,15 +26,15 @@
 | Datas | Entradas de consulta recebem `YYYY-MM-DD` civil já resolvido; início de semana é segunda-feira e a faixa é `[segunda, próxima segunda)` | SPEC-004 não interpreta “hoje”, “próxima semana” nem instantes. Resolução de linguagem natural pertence ao runtime/contrato temporal da SPEC-007, mantendo este módulo sem dependência dela. |
 | IDs | Aceitar e retornar IDs decimais em string; verificar representação além do limite seguro de `Number` | A tabela permanece `bigint`; não adicionar UUID/owner ID. A forma exata de seleção/cast deve ser comprovada em teste de contrato. |
 | Paginação | Ordem determinística com ID persistente como desempate e cursor vinculado aos filtros canônicos | `.range()` do Supabase depende de ordenação. Offset não promete snapshot se registros mudarem entre páginas; preferir cursor por chave ordenada se suportado pela consulta. |
-| Busca textual | Recomendação proposta: substring literal sem distinção entre maiúsculas/minúsculas em `demanda`, sem fuzzy search; múltiplos candidatos são retornados para o agente pedir narrowing | Não há semântica equivalente nas telas atuais. Escape de `%`/`_`/sintaxe PostgREST precisa de teste. Locale, sensibilidade a acentos e normalização Unicode seguem sem definição. O comportamento é uma proposta observável sujeita à revisão do usuário. |
-| Limites | Propor `pageSize` default 50/max 100, texto até 200 code points e intervalo de datas até 366 dias como valores técnicos iniciais | São limites novos porque a UI atual carrega todos os resultados. Devem permanecer identificados como proposta e ser revisados antes da implementação; não representam aprovação de DEC-012 nem orçamento. |
+| Busca textual | Aprovada para SPEC-004@2: substring literal em `demanda` via Supabase/PostgREST `ilike` (mapeado a PostgreSQL `ILIKE`), case-insensitive e accent-sensitive; `%`, `_` e `\` escapados como input literal | `ILIKE` usa a locale/collation ativa. PostgreSQL documenta escape por backslash para `%`/`_` e sensibilidade de caixa segundo locale; PostgREST expõe o operador `ilike`. Validar comportamento no projeto existente. Não criar collation ou extensão; não normalizar Unicode nem garantir equivalência NFC/NFD/full case-folding. Múltiplos candidatos pedem narrowing. |
+| Limites | Aprovados localmente: `pageSize` default 50/max 100; texto até 200 Unicode code points; intervalo civil inclusivo até 366 dias | Não alteram DEC-012, que permanece pendente para limites globais de abuso/consumo de provedores. |
 | Status | Ler valores persistidos e marcar origem: status de subtarefa armazenado; status de demanda/tarefa derivado pelos triggers atuais | Não recalcular, editar, normalizar ou traduzir os valores de domínio na camada de leitura. O rótulo visual “Análise” não muda o valor persistido `Analise`. |
 | Agenda | Consultas separadas: programação diária por data exata; alocação semanal para cartões atuais; rotina como template separado | Não unificar silenciosamente as diferentes projeções de backlog da UI. Não criar ocorrência nem entidade independente de compromisso. |
-| Segurança | Serviço consulta `withAgentAccess()` antes do repositório; o gate implementado na SPEC-001 sempre nega e nunca chama a operação protegida. O repositório recebe somente um cliente server-side estreito injetado pelo runtime futuro. | A SPEC-001 não fornece cliente server-side. Chave publicável e grants `anon` não verificam proprietário. Secret/service_role não substitui autorização. Nenhuma política ou grant é alterado. Testes de contrato diretos usam somente alvo isolado e sintético e não abrem o serviço. |
+| Segurança | Serviço consulta `withAgentAccess()` antes do repositório; o gate da SPEC-001 sempre nega e nunca chama a operação protegida. O repositório recebe cliente estreito injetado pelo runtime futuro. T025 usa somente fixtures sintéticas no projeto de desenvolvimento autorizado e nunca passa por endpoint do agente. | Exceção vale somente para SPEC-004@2 e o alvo atual. Preflight verifica alvo/schema/permissões/marcador; IDs e pais são registrados; rollback é preferido e cleanup alternativo é child-first por IDs capturados. Sem alteração preexistente, RLS, grant, schema ou migration. `service_role` não é identidade de usuário. |
 
 ## Recomendação
 
-Manter um módulo de consultas transacionais, server-side e sem efeitos colaterais, com operações explícitas para hierarquia/ID, filtros, agenda diária, alocação semanal e templates de rotina. Filtrar somente por DTO validado e colunas permitidas; retornar status e IDs sem perda; preservar a fonte relacional como autoridade. Busca semântica permanece em SPEC-008/009. O módulo não é exposto nem chamado em produção até o gate DEC-001 ser satisfeito.
+Manter um módulo de consultas transacionais, server-side e sem efeitos colaterais, com operações explícitas para hierarquia/ID, filtros, agenda diária, alocação semanal e templates de rotina. Filtrar somente por DTO validado e colunas permitidas; retornar status e IDs sem perda; preservar a fonte relacional como autoridade. Busca semântica permanece em SPEC-008/009. O serviço de produção não é exposto nem chama o repositório enquanto o gate DEC-001 permanecer fechado. Testes diretos de repositório são limitados às fixtures sintéticas da exceção desta SPEC.
 
 ## Referências primárias
 
@@ -41,4 +42,5 @@ Manter um módulo de consultas transacionais, server-side e sem efeitos colatera
 - PostgREST documenta ordenação e cast de projeção `::text`: [Tables and Views](https://docs.postgrest.org/en/stable/references/api/tables_views.html).
 - PostgreSQL `bigint` ocupa 64 bits e excede o inteiro seguro de JavaScript: [Numeric Types](https://www.postgresql.org/docs/15/datatype-numeric.html).
 - Supabase exige combinação de grants e RLS para acesso aos dados expostos; a role `anon` não é identidade autenticada: [Row Level Security](https://supabase.com/docs/guides/database/postgres/row-level-security) e [Securing your data](https://supabase.com/docs/guides/database/secure-data).
+- PostgreSQL 17 documenta `ILIKE` como case-insensitive conforme a locale ativa, o caractere de escape para curingas e limites com collations: [Pattern Matching](https://www.postgresql.org/docs/17/functions-matching.html) e [Collation Support](https://www.postgresql.org/docs/17/collation.html). Supabase JS expõe o filtro `ilike` e PostgREST o mapeia ao operador PostgreSQL: [Supabase JS `ilike`](https://supabase.com/docs/reference/javascript/using-filters-ilike), [PostgREST pattern operators](https://docs.postgrest.org/en/stable/references/api/tables_views.html#operators).
 - As decisões de domínio aprovadas continuam em `specs/agent-requirements-and-decisions.md`: DEC-002 entidades atuais, DEC-003 `America/Cuiaba`; o gate DEC-001 continua obrigatório para dados privados.

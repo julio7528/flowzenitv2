@@ -1,6 +1,6 @@
 ﻿# Implementation Plan: Domain Contracts and Read Tools
 
-**SPEC ID**: SPEC-004 | **Version**: 2 (proposta para revisão) | **Manifest hash**: atribuído ao criar lote
+**SPEC ID**: SPEC-004 | **Version**: 2 | **Manifest hash**: atribuído ao criar lote
 **Branch**: main (preservada; nenhuma branch criada) | **Date**: 2026-10-28 | **Spec**: [spec.md](spec.md)  
 **Status**: Draft — plano técnico proposto para revisão, sem aprovação de implementação.
 
@@ -15,12 +15,12 @@ O código futuro fica em módulos JavaScript server-side consumidos pelo runtime
 **Language/Version**: JavaScript ESM, Node/Vite existentes. Nenhuma migração para TypeScript.  
 **Primary Dependencies**: @supabase/supabase-js 2.118.0 já instalado; Node node:test. Nenhuma dependência nova.  
 **Storage**: PostgreSQL/Supabase existentes: public.demandas e public.recorrente; sem schema/grants/RLS/migration novos.  
-**Testing**: npm test, npm run lint, npm run build; doubles unitários e alvo Supabase isolado não produtivo para testes de contrato.  
+**Testing**: `npm test`, `npm run lint`, `npm run build`; doubles unitários e testes de contrato com fixtures sintéticas no Supabase de desenvolvimento FlowZenit V2 autorizado pelo proprietário, com isolamento lógico, preflight e limpeza estritamente seletiva.
 **Target Platform**: Módulos server-side consumidos pelo runtime/API cuja execução será definida na SPEC-002 e DEC-010. Não alterar o caminho atual browser→Supabase.  
 **Project Type**: SPA React/Vite existente com futura camada de leitura interna para o agente; esta SPEC não implementa o runtime nem endpoints HTTP.  
 **Performance Goals**: Nenhuma meta de latência aprovada. Consultas devem ser limitadas, pagináveis e utilizar filtros/ordenação que preservem o comportamento atual.  
 **Constraints**: DEC-001 bloqueia leituras privadas via agente. DEC-002 fixa as entidades existentes. DEC-003 fixa America/Cuiaba. Sem SQL arbitrário, mutações, RAG, nova identidade ou mudança de comportamento das telas atuais.  
-**Provisional query bounds**: recomendação técnica para revisão: page size default 50/max 100, texto até 200 code points e intervalo máximo 366 dias. Não são requisitos aprovados; valores precisam de revisão antes de implementação.
+**Par?metros locais aprovados pelo propriet?rio (2026-10-29)**: `pageSize` padr?o 50/m?ximo 100; texto at? 200 Unicode code points; intervalo civil inclusivo de no m?ximo 366 dias. Busca `ILIKE` literal, case-insensitive e accent-sensitive; `%`, `_` e barra invertida s?o escapados como entrada literal. Isso n?o aprova limites globais de abuso/provedores da DEC-012.
 
 ## Constitution Check
 
@@ -68,11 +68,11 @@ O código futuro fica em módulos JavaScript server-side consumidos pelo runtime
 5. getWeeklyAllocation(weekStart) para cartões semanais existentes (demanda sem tarefas e tarefa), incluindo itens sem data em coleção separada de backlog; subtarefas não são cartões semanais.
 6. getRoutineTemplates(date) para templates cujo weekday ISO corresponde e cuja data está no intervalo inclusivo.
 
-Busca textual não existe nas telas atuais. Recomenda-se substring literal sem distinção de caixa no campo demanda, com metacaracteres escapados; resultados múltiplos retornam candidatos e exigem narrowing do usuário, sem seleção silenciosa. Busca semântica, vetores, FTS híbrida e RRF pertencem a SPEC-008/009.
+Busca textual não existe nas telas atuais. Para SPEC-004@2, aplicar substring literal via PostgREST/Supabase `ilike` sobre `demanda`, com `%`, `_` e `\\` escapados; o campo `text` é envolvido por curingas somente pelo código da consulta. `ILIKE` usa a locale/collation ativa; a collation existente deve preservar diferenças de acento e ser compatível com pattern matching. Não normalizar Unicode nem prometer equivalência NFC/NFD ou full case-folding. Testar caixa, acento, `%`, `_` e `\\` por PostgREST. Resultados múltiplos permanecem candidatos e exigem narrowing, sem seleção silenciosa. RAG/FTS pertencem a SPEC-008/009.
 
 ### Bounds, order, and metadata
 
-- Recomenda-se validar pageSize (default 50, máximo 100), texto (200 code points) e intervalo de datas (até 366 dias). São valores propostos para revisão, não decisões aprovadas.
+- Aplicar os limites aprovados para esta SPEC: `pageSize` default 50/max 100, texto máximo 200 Unicode code points e faixa civil inclusiva máxima de 366 dias. Quando só um endpoint da faixa é fornecido, a paginação ainda limita a resposta e o filtro permanece aberto naquele lado.
 - Ordenação é explícita e determinística: chave de negócio da operação com ID persistente como desempate. Cursor opaco é vinculado a filtro e ordenação; não promete snapshot imutável entre páginas.
 - Resposta distingue sucesso vazio, completa, truncada, erro e, somente se aplicável, parcial/stale. Cursor aparece quando a página foi truncada; não se retorna erro como lista vazia.
 - As telas existentes têm diferenças no backlog: planejamento diário exclui Done, Kanban o inclui e semanal não filtra status; o painel inicial usa outra projeção de pai. A API proposta não migra nem uniformiza essas telas. A operação de agenda diária retorna apenas data exata; filtros de backlog/status são pedidos tipados separados.
@@ -87,8 +87,8 @@ Busca textual não existe nas telas atuais. Recomenda-se substring literal sem d
 
 ### Open items for user review
 
-- Os valores propostos de page size, tamanho do texto e intervalo exigem revisão explícita do usuário; DEC-012 trata limites de uso e abuso de chamadas externas e não aprova estes limites de consulta.
-- Busca textual é nova para o agente: semântica recomendada de substring case-insensitive, literal, ainda não é comportamento aprovado.
+- Os parâmetros locais desta SPEC foram aprovados pelo proprietário em 2026-10-29; não alteram DEC-012, que segue pendente para limites globais de uso/abuso e consumo de provedores.
+- A semântica de `ILIKE` depende da collation existente. O preflight e os testes de contrato devem comprovar sensibilidade a acentos e escape literal sem criar collation, extensão ou migration.
 - Cursor de paginação deve ser verificado contra mudanças concorrentes; não afirmar snapshot consistente.
 - DEC-001 continua bloqueando qualquer leitura privada exposta. A SPEC-004 não escolhe o futuro controle de acesso.
 - SPEC-007/DEC-013 definem linguagem relativa e ambiguidades de “próxima semana”; aqui só entram datas civis canônicas.
@@ -99,9 +99,9 @@ Busca textual não existe nas telas atuais. Recomenda-se substring literal sem d
 - **Precisão de IDs**: bigint ultrapassa o intervalo inteiro seguro de JavaScript. Mitigar com projeção textual e fixture além de Number.MAX_SAFE_INTEGER; sem alterar schema.
 - **Views divergentes**: backlog diário, Kanban, dashboard e semanal não exibem exatamente o mesmo conjunto. Mitigar com operações explicitamente nomeadas e não alterar a UI.
 - **Timezone implícito no browser**: componentes atuais usam datas locais. Não reutilizar cálculo local para ferramentas; aceitar data civil e aplicar DEC-003/ISO.
-- **Consultas sem paginação atuais**: limites novos podem truncar respostas. Exigir metadata, cursor e valores provisórios revisados; nunca truncar silenciosamente.
+- **Consultas sem paginação atuais**: limites novos podem truncar respostas. Exigir metadata, cursor e limites aprovados; nunca truncar silenciosamente.
 - **Autorização**: grants anon existentes não autorizam API privada. O gate permanece anterior ao repositório em produção. Nenhuma alteração de grant/RLS será feita nesta SPEC.
-- **Text search**: não havia filtro textual compartilhado. Definir substring como proposta e pedir narrowing quando houver mais de um candidato.
+- **Text search**: não havia filtro textual compartilhado. Aplicar os parâmetros aprovados via `ILIKE`; preservar acentos, escapar metacaracteres e pedir narrowing quando houver mais de um candidato.
 
 ## Execution and Recovery Plan
 
@@ -118,14 +118,14 @@ Busca textual não existe nas telas atuais. Recomenda-se substring literal sem d
 | Lint | Yes | npm run lint | Exit 0; nenhuma violação nova. |
 | Build | Yes | npm run build | Exit 0; módulos de leitura permanecem server-side. |
 | Unit/contract | Yes | npm test e doubles | Inputs estritos, hierarquia, status, candidatos, datas, paginação e metadata. |
-| Database | Yes | Teste direto do contrato do repositório contra alvo Supabase/PostgREST isolado, não produtivo, com fixtures sintéticas; testar separadamente o serviço com gate fechado | Projeção `bigint` como texto comprovada; nenhum dado de produto; nenhum endpoint/serviço chama o repositório enquanto o gate estiver fechado; sem migration/grant/RLS novos. A indisponibilidade do alvo impede a aprovação deste gate. |
+| Database | Yes | Teste direto do repositório via PostgREST no projeto de desenvolvimento existente, com autorização específica do proprietário; preflight de projeto, schema, permissões e colisão de marcador antes de inserir fixtures | Confirmar casts de `bigint`, filtros e `ILIKE`; registrar somente IDs/relacionamentos sintéticos; usar rollback quando transação direta for possível, senão cleanup por IDs capturados em ordem child-first. Se não puder provar escopo/cleanup, parar aquela operação, não tocar em dados preexistentes, e reportar bloqueio; não exigir Docker/projeto extra. O teste nunca passa por endpoint do agente. |
 | Security | Yes | Testes de gate/DTO/IDs/erros | SQL arbitrário recusado; IDs sem perda; sem exposição antes do gate. |
 | Agent-tool integration/security | Yes | Testes dos serviços internos com doubles e fixtures sintéticas | Vazio, sobreposição, truncamento, não divulgação e nenhuma chamada ao repositório com gate fechado. |
 | Browser E2E/accessibility | Conditional | Nenhuma UI existente é alterada por esta SPEC | Executar apenas se uma futura implementação aprovada alterar fluxo visual. |
 
 ## Entry and Completion Criteria
 
-**Entry for implementation**: SPEC-004 versão exata em lote aprovado e admitido pelo supervisor SDD; SPEC-001 access gate obrigatório para qualquer leitura privada em produção; limites propostos e semântica de busca revisados antes de se tornarem requisito executável; alvo de teste isolado disponível sem dados reais.
+**Entry for implementation**: SPEC-004 versão exata em lote aprovado e admitido pelo supervisor SDD; SPEC-001 access gate permanece fechado para qualquer leitura privada em produção; os parâmetros locais acima já estão aprovados. Antes do T025, verificar a conexão ao projeto de desenvolvimento autorizado, schema/constraints/collation/permissões e inexistência do marcador de fixture daquele run. Nenhum Docker ou projeto Supabase adicional é requisito.
 
 **Completion**: operações nomeadas têm contratos e testes; hierarquia/status/agenda/rotina preservam o modelo atual; limites/truncation são explícitos; IDs bigint não perdem precisão; nenhum SQL arbitrário, mutação, entidade nova, migration ou mudança de UI/permissão foi introduzida; leituras privadas continuam bloqueadas quando DEC-001 não foi satisfeita; todos os gates obrigatórios aplicáveis têm evidência `PASS`. Gate obrigatório sem execução ou evidência mantém a SPEC bloqueada; `NOT VERIFIED` só descreve gates explicitamente condicionais ou critérios futuros que não sejam requisito de conclusão desta SPEC.
 
