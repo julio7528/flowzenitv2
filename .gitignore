@@ -25,6 +25,11 @@ test-results/
 # Local Supabase CLI state
 supabase/.temp/
 
+# Local credentials and Codex personal state are never source files
+.agents/*
+!.agents/skills/
+!.agents/skills/**
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

@@ -1,0 +1,61 @@
+schema_version: "1.0"
+workflow:
+  id: "speckit"
+  name: "Draft Documentation Cycle"
+  version: "1.0.2"
+  author: "GitHub"
+  description: "Creates Draft SPEC, plan, and tasks; review gates only continue documentation and never approve status or implement."
+
+requires:
+  speckit_version: ">=0.8.5"
+  integrations:
+    # This workflow uses documentation commands only. Clarify and analyze remain
+    # available as separate project commands. Review gates below only control
+    # continuation of documentation; they do not approve SPEC status or a batch.
+    any:
+      - "alquimia"
+      - "claude"
+      - "copilot"
+      - "gemini"
+      - "opencode"
+
+inputs:
+  spec:
+    type: string
+    required: true
+    prompt: "Describe the feature to document"
+  integration:
+    type: string
+    default: "auto"
+    prompt: "Integration to use (e.g. claude, copilot, gemini; 'auto' uses the project's initialized integration)"
+
+steps:
+  - id: specify-draft
+    command: speckit.specify
+    integration: "{{ inputs.integration }}"
+    input:
+      args: "{{ inputs.spec }}"
+
+  - id: review-draft-spec
+    type: gate
+    message: "Review the Draft SPEC. Approve only to continue documentation; the SPEC remains Draft and no decision or batch is approved."
+    options: [approve, reject]
+    on_reject: abort
+
+  - id: plan-draft
+    command: speckit.plan
+    integration: "{{ inputs.integration }}"
+    input:
+      args: "{{ inputs.spec }}"
+
+  - id: review-draft-plan
+    type: gate
+    message: "Review the Draft plan. Approve only to continue documentation; this does not authorize implementation."
+    options: [approve, reject]
+    on_reject: abort
+
+  - id: tasks-draft
+    command: speckit.tasks
+    integration: "{{ inputs.integration }}"
+    input:
+      args: "{{ inputs.spec }}"
