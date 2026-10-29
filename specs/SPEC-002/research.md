@@ -1,57 +1,84 @@
 # Research: SPEC-002 runtime and DeepSeek integration
 
-**Date:** 2026-10-28  
-**Status:** Planning evidence only; no provider or runtime decision is approved here.
+**SPEC**: SPEC-002@2<br>
+**Date checked**: 2026-10-29<br>
+**State**: Planning evidence for a scoped Draft. No provider call, deployment, or global decision change is authorized by this document.
 
-## Repository baseline
+## Repository and supervisor baseline
 
-- The application is JavaScript ESM with React 19 and Vite. `package.json` currently declares neither LangGraph.js, LangChain.js, a DeepSeek client, nor a server framework. Existing scripts include `node --test`, `oxlint`, and `vite build`.
-- `vite.config.js` uses React and `envPrefix: 'VITE_'`. The browser Supabase client reads only `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`. The existing passkey and `sessionStorage` check are client navigation state, not a server-verifiable principal.
-- No API/runtime source, `api/`, `server/`, Vercel project config, or agent tests exist in the inspected checkout. SPEC-001 documents a proposed same-origin API contract and a Vercel Node Function option, both explicitly unapproved.
-- SPEC-001 assigns HTTP handlers, orchestration, provider calls, and runtime to SPEC-002; SPEC-004 owns exact read contracts; SPEC-005/006/007 own authorization policy, writes, and temporal interpretation; SPEC-003 owns conversation/checkpoint persistence. No duplicate domain query or write logic belongs here.
+- GitHub main and the local checkout both point to 7de0650bce600805efe4b712cd0aab7d1b24b2ea; the working tree was clean before the SPEC-002 document revision.
+- The local app is React/Vite and JavaScript ESM. package.json declares type module and the observed Node runtime is v24.13.0. No api directory, vercel.json, Vercel project link, LangGraph, LangChain, or DeepSeek package existed at inspection time.
+- The client uses VITE_ environment variables. The existing passkey and sessionStorage value do not authenticate requests at the server.
+- SDD status confirms SPEC-001@2 COMPLETED and SPEC-004@2 COMPLETED, each in its original completed batch/run. Global SDD status lists no active or paused batch and no active lease.
+- A read-only query of sdd.spec_versions returned no SPEC-002 row. Therefore no v1 SDD snapshot exists to replace. Version 1 is preserved at the consulted GitHub commit; this document revision is version 2.
+- The SDD supervisor rejects approval execution through the runner credential. Registration, candidate batch creation, validation, and prepare-approval are separate steps; exact administrator approval remains bound to the final batch UUID and manifest hash.
 
-## Framework and provider findings
+## DeepSeek API findings
 
-| Area | Evidence and planning implication |
-| --- | --- |
-| LangGraph.js | `StateGraph` nodes consume state and return updates; a checkpointer is required for checkpoint resume. A process-local memory saver demonstrates graph behavior but is not durable cross-request persistence. Use an injected checkpointer port; do not claim durable resume until SPEC-003 and DEC-005 provide an approved implementation/policy. |
-| LangChain.js / DeepSeek | LangChain documents `ChatDeepSeek` in `@langchain/deepseek` as beta and lists tool calling, structured output, and token streaming. This package and its compatible `@langchain/core`/LangGraph versions are not installed. Exact versions and model compatibility require a later dependency spike. |
-| DeepSeek protocol | The Chat Completions API may return content, tool calls, usage, finish reason, and provider-specific reasoning fields. API documentation warns that generated tool arguments may be malformed or include hallucinated fields; strict mode is beta and local validation remains required. In thinking mode with tools, the provider requires `reasoning_content` to be passed through subsequent requests. Keep any such value in short-lived adapter state only; never expose or log it. |
-| Vercel Node Functions | Vercel documents a root `api/` directory for Functions alongside Vite, the Node.js runtime, response streaming, configurable duration, cancellation support, and function regions. A Vite static SPA's local dev server does not itself establish an `/api` runtime; local parity, routing/rewrite behavior, region, cancellation config, plan limits, and deployment configuration remain to be verified. |
+The official Models & Pricing page lists deepseek-flash as the public model name and identifies the current served version as DeepSeek-V4.1-Flash-1017. It lists tool calls, Chat Completions, both thinking modes, and a maximum output far above this SPEC's 2,048-token cap. The page says the model name deepseek-flash should be used; legacy version names are not needed.
 
-## Runtime options for review
+The Chat Completions API documents the model field, thinking mode, max_tokens, tool definitions, usage, finish reasons, and tool_calls. It says tool-call arguments may be malformed or contain hallucinated fields and must be validated locally. Thinking can be disabled. The Tool Calls guide shows deepseek-flash with thinking disabled and explains that the model proposes function calls; the application supplies the handlers. Strict mode is beta and does not replace local authorization.
 
-1. **Root `api/*.js` Vercel Node Functions** — least structural change for the existing Vite SPA and supported by Vercel documentation. Risks: local dev parity, API/SPA route behavior, deployment limits/region, cancellation/streaming configuration, and DEC-010 approval.
-2. **Vite server plugin/runtime such as Nitro** — can co-locate server routes with Vite, but introduces dependencies and build/configuration changes not present in the checkout. Requires a separate compatibility and deployment review; not selected.
-3. **Separate Node service** — creates a clean server boundary but introduces a second runtime/deployment and same-origin/CORS concerns. Requires DEC-010 and is not selected.
+This SPEC therefore fixes deepseek-flash and non-thinking mode for its adapter contract, but still validates the exact request emitted by the pinned LangChain package with a mocked transport. No user message, real FlowZenit content, private row, or stored prompt is eligible for provider input. One optional live smoke may use only a synthetic/public prompt and is skipped without a server-only key.
 
-Vercel Node Functions are retained as an option for comparison, not as an approved architecture. The recommendation to keep runtime modules outside the Vite client graph is a security boundary; it does not decide the hosting product.
+Official sources:
 
-## Proposed compatibility baseline
+- [DeepSeek Models & Pricing](https://api-docs.deepseek.com/quick_start/pricing/)
+- [DeepSeek Chat Completions API](https://api-docs.deepseek.com/api/create-chat-completion/)
+- [DeepSeek Tool Calls](https://api-docs.deepseek.com/guides/tool_calls/)
+- [DeepSeek Thinking Mode](https://api-docs.deepseek.com/guides/thinking_mode/)
 
-- Use JavaScript ESM and a provider adapter behind the LangChain chat-model interface. Candidate packages are `@langchain/langgraph`, `@langchain/core`, `@langchain/deepseek`, and `langchain`/`zod` for schema-declared tools; none are installed by this planning task.
-- Use LangGraph for explicit state and transition control, LangChain `tool()`/schema abstractions for model-facing tool declarations, and a separate local allowlisted executor for authorization and execution. Any Zod schema is an input contract aid, not the sole authorization check. Do not delegate capability authorization to model prompts or provider-side strict mode.
-- Normalize DeepSeek responses to provider-neutral fields: content, tool proposals, finish reason, usage when present, and provider error category. Reject unsupported response combinations and validate each JSON argument locally.
-- Keep all provider calls disabled in the production path until DEC-006 data-sharing policy and DEC-011 model/API decisions are approved. Planning uses deterministic doubles only; no live provider call or private prompt is sent.
-- Keep all private reads and privileged actions disabled until the DEC-001 access-control gate is approved, implemented, and verified. A supplied conversation ID, passkey state, public Supabase key, or `service_role` credential is not authorization.
-- The initial turn is synchronous as an existing SPEC assumption. Streaming is an unresolved public contract and must be reviewed with the eventual chat/API consumer before implementation. Persisted conversation and checkpoints are out of scope here; no retention policy is selected.
+## LangChain and package compatibility
 
-## Open decisions and dependencies
+LangChain's current JavaScript documentation identifies ChatDeepSeek in @langchain/deepseek, documents tool calling and token-usage metadata, and labels the integration beta. The official reference describes the tool helper in @langchain/core/tools, so the umbrella langchain package is not required by the selected imports.
 
-- **DEC-001**: approved passkey interpretation; protected data/tool execution stays unavailable until a suitable server access gate exists. This SPEC selects no identity/session mechanism.
-- **DEC-005**: retention, deletion, export, and sharing policy for any persisted graph state or execution ledger.
-- **DEC-006**: provider data fields, redaction, opt-out, retention/location; blocks real FlowZenit content sent to DeepSeek and external tracing.
-- **DEC-010**: runtime, region, Vercel plan/duration, background work, and queue strategy.
-- **DEC-011**: exact DeepSeek model/API mode and version.
-- **DEC-012**: abuse/usage bounds; no financial budget is approved.
-- **SPEC-003**: durable conversation/checkpoint persistence and replay storage. SPEC-002 defines only the port and fails closed for capabilities that need durable state until an implementation is supplied.
-- **SPEC-005/006/007**: policy and typed write capabilities are downstream. This runtime starts with a deny-by-default registry and no enabled mutation tools.
-- **Still needing explicit resolution**: maximum graph/model/tool steps, provider/tool timeout values, retry counts/backoff, streaming behavior, fallback behavior, and model/provider package versions.
+Npm registry metadata queried on 2026-10-29 returned:
 
-## Official primary references
+| Package | Version | Peer/runtime evidence |
+| --- | ---: | --- |
+| @langchain/langgraph | 1.5.3 | Node >=18; @langchain/core ^1.1.48; Zod ^3.25.32 or ^4.2.0 |
+| @langchain/core | 1.3.1 | Node >=20 |
+| @langchain/deepseek | 1.1.21 | Node >=20; @langchain/core ^1.0.0 |
+| zod | 4.6.7 | Accepted by the LangGraph peer range |
 
-- LangGraph.js workflow/state/checkpointer concepts: [Thinking in LangGraph](https://docs.langchain.com/oss/javascript/langgraph/thinking-in-langgraph), [Persistence](https://docs.langchain.com/oss/javascript/langgraph/persistence).
-- LangChain.js DeepSeek adapter and feature status: [ChatDeepSeek integration](https://docs.langchain.com/oss/javascript/integrations/chat/deepseek), [API reference](https://reference.langchain.com/javascript/langchain-deepseek/ChatDeepSeek).
-- DeepSeek tool calls, strict-mode limits, and reasoning/tool protocol: [Tool Calls](https://api-docs.deepseek.com/guides/tool_calls/), [Thinking Mode](https://api-docs.deepseek.com/guides/thinking_mode/), [Chat Completions API](https://api-docs.deepseek.com/api/create-chat-completion/).
-- Vite integration and root `api/` route support: [Vite on Vercel](https://vercel.com/docs/frameworks/frontend/vite).
-- Node runtime, duration, cancellation, and streaming options: [Vercel runtimes](https://vercel.com/docs/functions/runtimes), [Function duration](https://vercel.com/docs/functions/configuring-functions/duration), [Functions API reference](https://vercel.com/docs/functions/functions-api-reference), [Streaming](https://vercel.com/docs/functions/streaming-functions).
+These ranges are mutually compatible with Node 24.13.0. Pin exact versions and verify the lockfile during T001. Adapter compatibility, timeout/cancellation behavior, and provider request fields remain runtime test obligations, not assumptions from package metadata.
+
+Official sources:
+
+- [LangChain ChatDeepSeek JavaScript integration](https://docs.langchain.com/oss/javascript/integrations/chat/deepseek/)
+- [LangChain tool helper in @langchain/core](https://reference.langchain.com/javascript/langchain-core/tools/tool)
+- [LangChain @langchain/core tools module](https://reference.langchain.com/javascript/langchain-core/tools)
+
+## Vercel and Node findings
+
+Official Vercel documentation states that a root api directory is supported for Vite projects and that Node Functions are built from functions placed there. The Node runtime documentation lists Node 24.x as the current default. Vercel configuration supports per-function maxDuration and supportsCancellation. The approved 45-second function duration is below current documented maximums, including the 60-second Hobby maximum when Fluid Compute is disabled.
+
+The local checkout has no Vercel config or project link. Therefore the code and function settings can be validated locally, but the actual account plan, region, project settings, and production routing remain NOT VERIFIED until a future deployment review. No deployment is part of this SPEC.
+
+Official sources:
+
+- [Vite on Vercel](https://vercel.com/docs/frameworks/frontend/vite)
+- [Vercel Node.js Functions](https://vercel.com/docs/functions/runtimes/node-js)
+- [Supported Node.js versions](https://vercel.com/docs/functions/runtimes/node-js/node-js-versions)
+- [Vercel function duration](https://vercel.com/docs/functions/configuring-functions/duration)
+- [Vercel function configuration](https://vercel.com/docs/project-configuration/vercel-json)
+
+## Supabase and data boundary
+
+The SDD operational database is separate from the product data path. The new SPEC-002 runtime adds no migration, table, product grant, RLS policy, service-role client, or database write. It delegates to the six existing SPEC-004 typed read contracts; positive test paths inject synthetic handlers and make no product database calls. The production route denies before creating or invoking those handlers while DEC-001 is closed.
+
+The Supabase changelog index was fetched on 2026-10-29 as required by the Supabase workflow. Recent breaking entries concerned CBC TLS cipher support and PostgreSQL minor-release extension/operator changes; neither changes the existing SDD registration RPC used here. No schema change is proposed in this SPEC.
+
+## Integration and remaining boundaries
+
+- DEC-001 remains closed. The production endpoint cannot invoke private reads or model calls.
+- DEC-006 is not globally resolved. It allows only public/synthetic content in the optional smoke; external traces remain off.
+- DEC-005/SPEC-003 still owns persistent checkpoints, history, replay storage, and retention. This SPEC defines ports and fakes only.
+- DEC-010 selects the route and runtime for this SPEC, but not production region or deployment.
+- DEC-011 selects the SPEC-scoped model/API/mode. It does not change decisions for other SPECs.
+- DEC-012 selects numeric runtime limits for this SPEC, not a global cost budget.
+- SPEC-005, DEC-009, SPEC-006, and SPEC-007 remain prerequisites for future mutation capabilities.
+- `server/domain/read/pagination.js` implements hierarchy cursors with AES-256-GCM; `server/domain/read/hierarchy.js` binds them to the item and ordering, and `server/domain/read/index.js` injects the cursor key into the service. SPEC-002 treats cursor strings as opaque tokens and passes them through unchanged.
+- HIERARCHY_CURSOR_SECRET must be a server-only Uint8Array of at least 32 bytes, shared across instances; key rotation invalidates cursors. It is never placed in an SDD snapshot or output.
+
+No decision register outside SPEC-002 is changed by this planning revision.

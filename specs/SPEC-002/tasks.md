@@ -1,144 +1,123 @@
 ---
-description: "Dependency-ordered implementation tasks for SPEC-002"
+description: "Dependency-ordered implementation tasks for SPEC-002@2"
 ---
 
 # Tasks: LangGraph Runtime and DeepSeek Model Integration
 
-**Input**: Design documents from `specs/SPEC-002/`
+**SPEC**: SPEC-002@2, Draft until supervisor registration and exact batch approval<br>
+**Inputs**: spec.md, plan.md, research.md, data-model.md, contracts/agent-turn.md, contracts/runtime-ports.md, quickstart.md<br>
+**Dependencies**: SPEC-001@2 and SPEC-004@2 are supervisor-recorded COMPLETED. The new batch must contain only SPEC-002@2 and pass supervisor validation.<br>
+**Tests**: Use the real LangGraph implementation with deterministic model, tool, clock, and persistence doubles. No product database writes. No real FlowZenit data or private content may be sent to DeepSeek.
 
-**Prerequisites**: `spec.md`, `plan.md`, `research.md`, `data-model.md`, `contracts/agent-turn.md`, `contracts/runtime-ports.md`, and `quickstart.md`.
+## Preconditions and gates
 
-**Tests**: Required by the SPEC and constitution. Use deterministic provider/tool/checkpoint doubles for regular tests. Do not call a live provider or send private data without the stated approvals. This is a future task plan; none of these tasks were executed here.
-
-**Organization**: Tasks follow the three user stories in `spec.md`. Proposed `server/` and `api/` paths are server-only; the runtime choice and route adapter remain conditional on DEC-010.
-
-## Preconditions and unresolved decisions
-
-- Execute only the exact SPEC version in a user-authorized batch admitted by `$sdd-run`.
-- SPEC-001 and SPEC-004 must pass in the approved sequence before runtime implementation.
-- DEC-001 is an access-control prerequisite, not an authentication solution. Until adequate control is approved, implemented, and verified, private reads and privileged capabilities stay disabled.
-- DEC-006 must approve data sent to DeepSeek; DEC-011 must resolve model/API mode and compatible dependency versions. No real provider calls or private content in tests before those decisions.
-- DEC-010 must resolve runtime/region/platform limits before selecting the HTTP route. Vercel Node Functions remain an option only.
-- DEC-012 and user review must resolve step/call/payload/time/retry ceilings. No numeric values or financial budget are approved by this task list.
-- DEC-005/SPEC-003 must provide approved durable checkpoint/ledger behavior before persistent history, cross-request resume, or mutation replay. DEC-009/SPEC-005 and SPEC-006/007 are additional prerequisites before any write tool is enabled.
+- DEC-001 remains closed. The production route denies requests before provider, Supabase, or tool calls. The client passkey is not authentication.
+- DEC-006 is scoped to public or synthetic content for at most one optional provider smoke request. No real FlowZenit content or external trace is allowed. This does not resolve DEC-006 globally.
+- DEC-010 for this SPEC selects Node.js 24 ESM, a root Vercel Node Function at POST /api/agent/turn, synchronous JSON, and no streaming, background work, or deployment. Set function maxDuration to 45 seconds and cancellation support. Do not set a region.
+- DEC-011 for this SPEC selects DeepSeek deepseek-flash, OpenAI-compatible Chat Completions, and thinking disabled. Prefer ChatDeepSeek; evaluate the authorized minimal REST fallback only if the adapter fails a required contract.
+- DEC-012 for this SPEC sets 12 graph steps, 3 model invocations, 4 tool invocations, one additional eligible transient retry, 15 seconds per model call, 5 seconds per tool call, 45 seconds total, 8 KiB request, 16 KiB response, and 2,048 output tokens when supported. Requests cannot change these limits.
+- DEC-005/SPEC-003 own production checkpoint, conversation, and ledger storage. This SPEC defines ports and fakes only. No write tool is registered.
+- HIERARCHY_CURSOR_SECRET is server-only, at least 32 bytes, shared across instances, and never hard-coded. The hierarchy operation fails closed if the key is absent or invalid.
+- The existing hierarchy cursor is an opaque AES-256-GCM token; pass it through unchanged and never decode or reconstruct it in SPEC-002.
+- Do not modify global decision status, authentication, product grants/RLS, product data, or deployment state.
 
 ## Phase 1: Setup
 
-**Purpose**: Create the future server-only runtime/test skeleton and resolve package compatibility before changing dependencies.
+**Purpose**: Confirm package compatibility and establish server-only modules and isolated synthetic fixtures.
 
-- [ ] T001 Confirm and record compatible pinned versions for `@langchain/langgraph`, `@langchain/core`, `@langchain/deepseek`, `langchain`, and `zod` in `package.json` and `package-lock.json` only after DEC-011 review; verify Node ESM and peer compatibility (FR-011, FR-012).
-- [ ] T002 Create server-only module entry and synthetic fixture layout in `server/agent/runtime/index.js` and `tests/fixtures/agent/turns.js`; verify the React/Vite entry graph does not import `server/` (FR-001, FR-002, SC-004).
+- [ ] T001 Verify Node 24 ESM and pin only required compatible dependencies in package.json and package-lock.json: @langchain/langgraph 1.5.3, @langchain/core 1.3.1, @langchain/deepseek 1.1.21, zod 4.6.7. Set engines.node to 24.x. Verify peer ranges and import paths. Do not add the langchain umbrella package unless an implementation import requires it.
+- [ ] T002 Create the server-only runtime entry and synthetic model/tool/checkpoint fixtures under server/agent/runtime/ and tests/fixtures/agent/. Verify src and Vite client entry points cannot import server modules.
 
-## Phase 2: Foundational
+## Phase 2: Foundational contracts
 
-**Purpose**: Define shared request/state/error/limits/capability/persistence boundaries that block all user stories.
+**Purpose**: Define request/state/error/limit/capability/persistence boundaries shared by all stories.
 
-- [ ] T003 [P] Define validated `AgentTurnRequest`, trusted correlation/version context, `GraphState`, proposal and terminal DTOs in `server/agent/runtime/state.js` (FR-001, FR-002, FR-010).
-- [ ] T004 [P] Implement required finite runtime limit parsing and fail-closed behavior for absent/invalid settings in `server/agent/runtime/limits.js`; values remain pending review (FR-006, SC-002).
-- [ ] T005 [P] Define normalized provider/tool/runtime error categories and exact terminal outcomes in `server/agent/http/errors.js` (FR-010).
-- [ ] T006 Define server-created access/disclosure capability interfaces and default-deny registry in `server/agent/runtime/capabilities.js`; caller fields and passkey state cannot grant access (FR-002, FR-004, FR-005, FR-011, SC-001).
-- [ ] T007 Define injected checkpoint and durable execution-ledger ports in `server/agent/persistence/ports.js`; leave persistent storage to SPEC-003/DEC-005 and deny mutations if the durable port is absent (FR-002, FR-008, SC-003).
-- [ ] T008 [P] Define provider-secret loading and an allowlisted, redacted event schema in `server/agent/observability/safe-events.js`; exclude prompts, arguments, results, reasoning, secrets, and raw exceptions (FR-002, FR-009, FR-011).
+- [ ] T003 [P] Define validated AgentTurnRequest, server-generated context, GraphState, ToolProposal, normalized result, and terminal DTOs in server/agent/runtime/state.js. Exclude client authority, private history, raw provider data, credentials, and reasoning.
+- [ ] T004 [P] Implement fail-closed server parsing for all fixed DEC-012 limits in server/agent/runtime/limits.js, including call counts, deadlines, 8 KiB input, 16 KiB response, and 2,048 output tokens. Reject user-supplied limit overrides.
+- [ ] T005 [P] Define safe provider/tool/runtime error categories, terminal outcomes, and HTTP mapping in server/agent/http/errors.js.
+- [ ] T006 Implement server-created access/disclosure decisions and a production default-deny policy in server/agent/runtime/capabilities.js. Neither passkey state nor caller/model fields can enable a capability. Closed-gate requests execute zero external calls.
+- [ ] T007 Define injected CheckpointPort and ExecutionLedger interfaces in server/agent/persistence/ports.js. Provide no database schema or production persistence implementation; deny any synthetic mutation execution without fake/real durable reserve and outcome acknowledgements.
+- [ ] T008 [P] Define server-only DeepSeek and cursor-secret validation in server/agent/config/secrets.js, and safe allowlisted event fields in server/agent/observability/safe-events.js. Never log prompts, messages, reasoning, tool inputs/results, secrets, or raw exceptions; keep LangSmith tracing disabled.
 
-**Checkpoint**: All user stories may use doubles, but production model calls and protected tools remain disabled until their approval gates pass.
+**Checkpoint**: Shared contracts compile. Production access, provider invocation from the HTTP route, durable persistence, and mutations remain disabled.
 
-## Phase 3: User Story 1 — Receive a grounded answer (Priority: P1)
+## Phase 3: User Story 1 — Execute a real bounded LangGraph turn
 
-**Goal**: Execute a single model turn or an approved typed tool path, then return evidence and inference separately.
-
-**Independent Test**: A deterministic model double covers answer-only, allowed tool proposal, invalid/unknown proposal, and refusal; the graph reaches one terminal result and disabled capabilities execute zero tools.
+**Goal**: Build a real graph and prove answer, tool proposal, refusal, validation, and terminal paths.
 
 ### Tests for User Story 1
 
-- [ ] T009 [P] [US1] Add graph transition tests for answer-only, tool-call-only, refusal, empty, and mixed model output in `tests/unit/agent/graph-routing.test.js` (FR-001, FR-003, FR-010, SC-002).
-- [ ] T010 [P] [US1] Add provider normalization tests for usage, finish reason, invalid JSON arguments, and omitted/unknown fields in `tests/contracts/agent/model-adapter.test.js` (FR-003, FR-011, FR-012, SC-001).
-- [ ] T011 [P] [US1] Add tests proving unknown/malformed/unauthorized proposals invoke zero handlers in `tests/security/agent/tool-proposals.test.js` (FR-004, FR-005, SC-001).
+- [ ] T009 [P] Add routing tests that execute the real LangGraph StateGraph with deterministic doubles for answer-only, tool-only, refusal, empty, mixed, malformed, and unsupported model output in tests/unit/agent/graph-routing.test.js.
+- [ ] T010 [P] Add ChatDeepSeek adapter contract tests using mocked fetch in tests/contracts/agent/model-adapter.test.js. Verify request model, non-thinking mode, tool schema, output-token cap, normalized usage/finish reason/tool calls, malformed arguments, timeout, cancellation, and provider errors.
+- [ ] T011 [P] Add security tests proving unknown, malformed, unauthorized, over-budget, or unregistered tool proposals invoke zero handlers in tests/security/agent/tool-proposals.test.js.
 
-### Implementation for User Story 1
+### Runtime and provider implementation
 
-- [ ] T012 [US1] Implement the provider-neutral LangChain adapter interface and normalized result mapping in `server/agent/model/adapter.js` (FR-003, FR-009, FR-011).
-- [ ] T013 [US1] Implement the candidate `ChatDeepSeek` adapter in `server/agent/model/deepseek.js` using server-only configuration and no hard-coded model ID; activate only after DEC-006/011 and compatibility evidence (FR-003, FR-011).
-- [ ] T014 [US1] Implement explicit LangGraph state and bounded routing nodes in `server/agent/runtime/build-graph.js` and `server/agent/runtime/turn.js` (FR-001, FR-002, FR-006, FR-010, SC-002).
-- [ ] T015 [US1] Implement named/versioned LangChain `tool()` declarations and independent local argument validation in `server/agent/tools/registry.js` and `server/agent/tools/validate.js`; do not accept SQL, code, tables, columns, or arbitrary filters (FR-004, FR-005, SC-001).
-- [ ] T016 [US1] Implement policy check and executor wrapper in `server/agent/tools/execute.js`; recheck server access capability and budgets immediately before a handler, and keep private/write registry entries denied by default (FR-002, FR-004, FR-005, SC-001).
-- [ ] T017 [US1] Implement evidence/inference/missing-evidence/uncompleted-action response composition in `server/agent/runtime/response.js` (FR-009).
-- [ ] T018 [US1] Add the conditional HTTP adapter in `api/agent/turn.js` only if DEC-010 selects the root Vercel Node Function approach; otherwise use the path/handler selected by the approved runtime decision (FR-002, FR-010).
-- [ ] T019 [US1] Add service-level request-to-terminal tests using a test-only synthetic capability for the successful fake read, and separate closed access/disclosure cases that prove zero protected calls, in `tests/contracts/agent/turn-flow.test.js` (FR-001, FR-002, FR-004, FR-009, FR-012, SC-001, SC-002).
+- [ ] T012 Implement provider-neutral ModelAdapter.complete with timeout, AbortSignal, fixed max tokens, normalized results, and safe provider error categories in server/agent/model/adapter.js.
+- [ ] T013 Implement ChatDeepSeek in server/agent/model/deepseek.js using the pinned package, deepseek-flash, OpenAI-compatible Chat Completions, and thinking disabled. Confirm tool calling, usage, max tokens, abort, and error behavior with T010. If a required contract cannot be met, implement the SPEC-approved minimal REST adapter behind the same port; do not add a second provider.
+- [ ] T014 Implement and version the actual LangGraph StateGraph and bounded node/edge routing in server/agent/runtime/build-graph.js and server/agent/runtime/turn.js. Enforce one terminal outcome and all graph/model/tool/deadline budgets.
+- [ ] T015 Implement the six named/versioned typed read tools in server/agent/tools/registry.js using Zod schemas and the LangChain tool helper from @langchain/core/tools. Delegate only to the SPEC-004 service contracts. Preserve UNSUPPORTED_ENTITY, requiresNarrowing, candidate references, hierarchy context, opaque AES-256-GCM cursors passed through unchanged, bigint strings, and truncation metadata.
+- [ ] T016 Implement server-side proposal validation, default-deny policy, and tool executor in server/agent/tools/execute.js. Recheck capability, exact schema, domain preconditions, budget, deadline, cancellation, and tool registration immediately before every handler.
+- [ ] T017 Implement bounded evidence/inference/missing-evidence/uncompleted-action response composition in server/agent/runtime/response.js. Preserve SPEC-004 unsupported, narrowing, candidate, and truncation semantics.
 
-**Checkpoint**: The synthetic graph answers or safely terminates. A production provider or private data capability is not enabled solely by this story.
+### HTTP integration
 
-## Phase 4: User Story 2 — Bound execution and recover failures (Priority: P1)
+- [ ] T018 Implement api/agent/turn.js and vercel.json for POST /api/agent/turn as a Node 24 ESM Vercel Function with maxDuration 45 and supportsCancellation true. The production handler returns CAPABILITY_DISABLED while the access gate is closed and calls no model, Supabase client, or tool. Do not add region, deployment, auth, or public provider activation.
+- [ ] T019 Add request-to-terminal integration tests in tests/contracts/agent/turn-flow.test.js using the real graph, synthetic injected SPEC-004 handlers, and test model doubles. Test all six tool contracts, closed-route zero-call behavior, 405/415/400/413 request validation statuses, valid-turn terminal status mapping, 8 KiB input rejection, 16 KiB response cap, and terminal response shape.
 
-**Goal**: Enforce finite model/tool work, classify failures, cancel in-flight work, and prevent duplicate replay effects.
+**Checkpoint**: The real graph runs deterministically with synthetic injected capabilities. Production HTTP invocation remains denied.
 
-**Independent Test**: Inject transient/permanent provider and tool failures, timeouts, cancellation, budget exhaustion, checkpoint failure, and a replayed completed synthetic mutation; assert one terminal result within configured limits and no duplicate effect.
+## Phase 4: User Story 2 — Bound, cancel, retry, and replay safely
+
+**Goal**: Prove finite work, safe errors, cancellation, and no duplicate synthetic effect.
 
 ### Tests for User Story 2
 
-- [ ] T020 [P] [US2] Add retry-classification tests proving only transient errors retry and authorization/validation/domain errors do not in `tests/unit/agent/retry-policy.test.js` (FR-006, FR-007, SC-002).
-- [ ] T021 [P] [US2] Add timeout, `AbortSignal`, and exhausted-budget tests in `tests/contracts/agent/cancellation-and-bounds.test.js` (FR-006, FR-010, SC-002).
-- [ ] T022 [P] [US2] Add fake-ledger replay tests proving durable reservation precedes a synthetic mutation and a completed result is not executed twice in `tests/contracts/agent/replay.test.js` (FR-008, SC-003).
-- [ ] T023 [P] [US2] Add checkpoint/ledger-unavailable and uncertain-mutation tests in `tests/security/agent/durability-gate.test.js` (FR-008, SC-003).
+- [ ] T020 [P] Add retry classification tests proving one extra attempt is allowed only for eligible transient provider failures or verified idempotent reads in tests/unit/agent/retry-policy.test.js.
+- [ ] T021 [P] Add deadline, per-call timeout, AbortSignal, 12-step, 3-model-call, 4-tool-call, 8 KiB, 16 KiB, and output-token limit tests in tests/contracts/agent/cancellation-and-bounds.test.js.
+- [ ] T022 [P] Add fake-ledger reserve/start/outcome/replay tests proving a completed synthetic effect is not executed twice in tests/contracts/agent/replay.test.js.
+- [ ] T023 [P] Add checkpoint/ledger-unavailable and uncertain-result security tests proving that no operation requiring durable replay proceeds in tests/security/agent/durability-gate.test.js.
 
-### Implementation for User Story 2
+### Bounded runtime implementation
 
-- [ ] T024 [US2] Implement finite retry classification and per-node policy in `server/agent/runtime/retry.js`; retry only transient provider failures or verified idempotent reads (FR-006, FR-007, SC-002).
-- [ ] T025 [US2] Propagate request cancellation and deadlines through graph, model adapter, and tool adapter in `server/agent/runtime/cancellation.js` (FR-006, FR-010, SC-002).
-- [ ] T026 [US2] Integrate ledger reserve/start/outcome checks in `server/agent/tools/execute.js`; return a safe denial whenever durable acknowledgment is missing or ambiguous (FR-008, SC-003).
-- [ ] T027 [US2] Implement stable safe terminal responses and allowlisted correlation events in `server/agent/http/errors.js` and `server/agent/observability/safe-events.js` (FR-009, FR-010, SC-002).
+- [ ] T024 Implement transient-only retry policy with one additional attempt and deterministic 250 ms delay in server/agent/runtime/retry.js. Count retry calls against the model/tool budgets and stop when the total deadline would be exceeded.
+- [ ] T025 Implement request cancellation and deadlines in server/agent/runtime/cancellation.js and propagate signals to model and tool adapters; stop scheduling nodes after abort.
+- [ ] T026 Integrate ledger reservation, started, outcome, and replay checks in server/agent/tools/execute.js. Production mutation registry stays empty; any synthetic mutation exists only in tests and requires the fake durable ledger.
+- [ ] T027 Implement safe terminal responses and allowlisted correlation events in server/agent/http/errors.js and server/agent/observability/safe-events.js. Never expose prompt, reasoning, credential, raw provider exception/body, or raw tool result.
 
-**Checkpoint**: Each injected failure has a bounded terminal category; no mutation is executable without the durable ledger contract.
+**Checkpoint**: Every injected failure reaches one bounded terminal outcome. The production route remains fail-closed and has no write capability.
 
-## Phase 5: User Story 3 — Inspect a deterministic execution (Priority: P2)
+## Phase 5: User Story 3 — Deterministic inspection and regression
 
-**Goal**: Replay versioned synthetic fixtures and compare graph path, tool decisions, terminal category, and correlation metadata.
+**Goal**: Reproduce graph outcomes and validate versioned checkpoint/model/tool inputs.
 
-**Independent Test**: Repeated test runs with the same fixture and doubles produce the same node outcomes and decisions; natural-language response wording is not compared.
+- [ ] T028 [P] Add versioned synthetic fixtures for graph paths, model results, tool results, budget exhaustion, terminal outcomes, and correlation in tests/fixtures/agent/deterministic-runs.js.
+- [ ] T029 Implement tests/helpers/agent/replay.js to run the real StateGraph repeatedly with model, tool, clock, checkpoint, and ledger doubles; compare node outcomes and decisions rather than prose.
+- [ ] T030 Add tests/contracts/agent/replay-versioning.test.js for graph-version mismatch, unknown state/node, opaque cursor pass-through without decoding, tool metadata preservation, unsupported model shapes, and deterministic replay.
 
-### Tests and implementation for User Story 3
+**Checkpoint**: Repeated synthetic runs produce the same graph path, tool decisions, and terminal outcome.
 
-- [ ] T028 [P] [US3] Add versioned graph-path, tool-decision, terminal, and correlation fixtures in `tests/fixtures/agent/deterministic-runs.js` (FR-001, FR-002, FR-012, SC-004).
-- [ ] T029 [US3] Implement the deterministic replay harness in `tests/helpers/agent/replay.js` with model/tool/checkpoint doubles and stable assertions (FR-001, FR-012, SC-003, SC-004).
-- [ ] T030 [US3] Add regression tests for graph-version mismatch, unknown node/checkpoint state, and unsupported provider/tool response shape in `tests/contracts/agent/replay-versioning.test.js` (FR-001, FR-003, FR-010, FR-012, SC-004).
+## Phase 6: Security and cross-cutting verification
 
-**Checkpoint**: Repeated synthetic fixture runs match expected node transitions and tool decisions without comparing generated prose.
+**Purpose**: Verify browser/server separation, redaction, operational instructions, and complete evidence.
 
-## Phase 6: Polish and cross-cutting verification
+- [ ] T031 [P] Add tests/security/agent/client-boundary.test.js proving provider and cursor secrets, api/, and server/ modules are absent from Vite assets and source maps.
+- [ ] T032 [P] Add tests/security/agent/redaction.test.js proving messages, prompts, reasoning, credentials, private tool data, tool inputs/results, and raw provider errors are absent from responses and logs.
+- [ ] T033 Update specs/SPEC-002/quickstart.md with the exact commands and actual results from the authorized run. Mark the optional provider smoke and production deployment NOT VERIFIED when not performed.
+- [ ] T034 Run focused graph/model/tool/security tests, npm test, npm run lint, npm run build, Node ESM checks, and the server/client bundle boundary checks. Record commands and exit codes. Do not require Docker or write to the product database.
+- [ ] T035 Perform an independent read-only conformance audit against the registered SPEC-002 snapshot, this plan, and these 35 tasks; verify gates, no private provider disclosure, DEC-001 closed, no writes, no deployment, and evidence in the SDD run.
 
-**Purpose**: Confirm client/server separation, safe output, integration fit, and completion evidence across all stories.
+## Dependencies, parallelism, and implementation order
 
-- [ ] T031 [P] Add bundle and environment boundary tests proving provider secrets and `server/` modules are absent from Vite client assets in `tests/security/agent/client-boundary.test.js` (FR-002, FR-011, SC-001).
-- [ ] T032 [P] Add response/log redaction tests proving prompts, reasoning, credentials, private tool data, and raw provider errors are not exposed in `tests/security/agent/redaction.test.js` (FR-003, FR-009, SC-001).
-- [ ] T033 Update `specs/SPEC-002/quickstart.md` with actual implementation commands and evidence; mark unavailable provider/runtime/access checks `NOT VERIFIED` (FR-012, SC-001–SC-004).
-- [ ] T034 Run focused agent checks, `npm test`, `npm run lint`, and `npm run build` from `package.json`; record real output and verify the chosen runtime's build locally (FR-001–FR-012, SC-001–SC-004).
-- [ ] T035 Review implementation against `specs/SPEC-002/spec.md`, `specs/SPEC-002/plan.md`, and `specs/SPEC-002/tasks.md`; confirm no new authentication, private provider disclosure, arbitrary tools, unbounded loop, or unapproved runtime selection, then persist evidence only through the authorized SDD run (FR-001–FR-012, SC-001–SC-004).
+- T001 precedes every package-dependent task; T002 precedes all runtime modules.
+- T003–T008 define the shared contracts. T006 gates all route and handler paths. T007 is interfaces and test doubles only.
+- T009–T011 use distinct test files and can be authored independently after the package pins and interfaces are established.
+- T012 precedes T013. T014 constructs the real graph. T015–T017 integrate tools, policy, and responses after the graph contracts are stable. T018 follows the route contract and remains fail-closed. T019 exercises the integrated flow.
+- T020–T023 use distinct test files. T024–T027 follow their contracts and integrate in the graph sequentially.
+- T028 and T031–T032 use disjoint files and may be prepared independently after interfaces stabilize. T029–T030 require the real graph and fixtures.
+- Do not delegate overlapping files. Record task ownership, configured agent profile, test evidence, and completion in Supabase before and after each authorized delegation.
+- T033–T035 run after implementation. A failed required check uses the official SDD correction flow and existing 5-attempt/120-minute limits. Do not reset counters or replace the batch/run.
 
-## Dependencies and execution order
+## Completion boundary
 
-- Setup (Phase 1) precedes the shared runtime foundation (Phase 2). T001 is blocked until the package/model compatibility and DEC-011 review; it must not install a guessed version.
-- T003–T008 define shared contracts and gates; all story work depends on this phase. T006 is deny-by-default. T007 has no production persistence implementation in this SPEC.
-- User Stories 1 and 2 are both P1 and share the graph foundation. Story 1 must establish adapter/graph/tool contracts before Story 2 adds bounded recovery. User Story 3 is P2 and follows the stable node/result shape.
-- Tool and HTTP tasks are conditional on their approvals: T013 on DEC-006/011, T018 on DEC-010, T026 on durable SPEC-003/DEC-005 plus later write SPECs and DEC-009. A blocked task leaves that capability disabled.
-- Only tasks marked `[P]` touch independent files and have no prerequisite edge. Graph integration and shared files remain sequential.
-
-## Parallel opportunities
-
-- After interfaces stabilize, T009–T011 use separate test files and can be authored independently.
-- T020–T023 use separate failure/replay test files and can be authored independently against shared fakes.
-- T031–T032 are separate security test files and can proceed independently after the runtime interface exists.
-- Graph construction, provider integration, authorization, and replay persistence are not parallel because they share contracts or security gates.
-
-## Implementation strategy
-
-1. Establish versions and shared DTO/limit/gate/port contracts only after their decisions are resolved.
-2. Build and test the graph with deterministic doubles; keep production provider/tool registries disabled.
-3. Add the DeepSeek adapter only after data-sharing/model decisions and package compatibility are approved.
-4. Add bounded failure/cancellation behavior and test-only replay first; production persistence remains owned by SPEC-003.
-5. Integrate an HTTP route only after DEC-010 selects the runtime; private reads/writes remain gated.
-6. Run security, contract, lint/build, and conformance gates; record unavailable checks as `NOT VERIFIED`.
-
-## Notes
-
-- All tasks are future implementation work and have not been executed in this document-only turn.
-- This plan does not approve DeepSeek model IDs, package versions, timeout/retry/streaming values, Vercel runtime/region, provider disclosure, checkpoint retention, or an access-control mechanism.
-- No `$sdd-run`, provider call, Supabase/DB change, dependency installation, code change, commit, push, merge, or deploy occurred while preparing this task list.
+All executable tasks must be completed in the exact approved batch. Required checks must have real evidence and pass. A missing optional provider credential records the optional smoke as NOT VERIFIED and does not block deterministic acceptance. A closed access gate, absent persistent storage, disabled mutations, unselected region, and no deployment are expected restrictions for this SPEC, not permission to activate those capabilities.
