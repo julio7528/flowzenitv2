@@ -27,6 +27,21 @@ Este roteiro aplica-se somente a uma execução autorizada do snapshot exato de 
 11. Se existir credencial DeepSeek server-only, o smoke opcional pode fazer no máximo uma solicitação sintética, com saída máxima reduzida. Não imprima nem registre a credencial. Caso contrário registre NOT VERIFIED.
 12. Registre cada gate com comando, exit code, resultado real e evidência segura no run exato do SDD. Não marque como PASS o smoke opcional ou o deploy que não forem executados.
 
+## Resultados observados — execução autorizada
+
+Run SDD: `1bc2a7f8-68b8-4dd3-b5c2-0f8ebe0cc28e`, lote `8b693128-c9e4-47a7-ac87-35c07dcdaa2f`, snapshot `608143f34eb680c5ec337f88776fde2e9e691dc71679c2dcad3ef03589cb7e59`.
+
+| Verificação | Comando | Resultado observado |
+| --- | --- | --- |
+| Runtime | `node --version` | Exit 0; Node `v24.13.0`. |
+| Testes focados de runtime, modelo, integração e segurança | `node -e "const {spawnSync}=require('node:child_process'); const files=['tests/unit/agent/graph-routing.test.js','tests/unit/agent/retry-policy.test.js','tests/contracts/agent/turn-flow.test.js','tests/contracts/agent/cancellation-and-bounds.test.js','tests/contracts/agent/replay.test.js','tests/contracts/agent/replay-versioning.test.js','tests/contracts/agent/model-adapter.test.js','tests/security/agent/tool-proposals.test.js','tests/security/agent/safe-terminal-events.test.js','tests/security/agent/redaction.test.js','tests/security/agent/executor-ledger.test.js','tests/security/agent/durability-gate.test.js','tests/security/agent/client-boundary.test.js','tests/security/agentNoPrivateAccess.test.js']; const r=spawnSync(process.execPath,['--test',...files],{stdio:'inherit'}); process.exit(r.status??1)"` | Exit 0; 74 aprovados, 0 falhas, 0 ignorados. |
+| Testes completos | `npm test` | Exit 0; 144 no total, 143 aprovados, 0 falhas, 1 ignorado. O teste ignorado é a verificação PostgREST opcional que exige `RUN_SPEC004_SUPABASE_CONTRACT=1`; nenhum banco de produto foi acessado. |
+| Lint | `rtk proxy npm run lint` | Exit 0; Oxlint passou sem diagnósticos. A execução inicial por `npm run lint` apresentou erro de parsing da saída pelo wrapper RTK; o comando via proxy executou o lint real. |
+| Build cliente | `npm run build` | Exit 0; Vite 8.3.5 transformou 165 módulos. |
+| Bundle server-side e sintaxe ESM | `node --input-type=module -e "const {build}=await import('vite'); const {spawnSync}=await import('node:child_process'); const result=await build({configFile:false,build:{ssr:'api/agent/turn.js',write:false,rollupOptions:{external:['@langchain/core','@langchain/deepseek','@langchain/langgraph','@supabase/supabase-js','zod']}}}); const outputs=Array.isArray(result)?result:[result]; const chunks=outputs.flatMap(o=>o.output.filter(i=>i.type==='chunk')); if(!chunks.length) throw Error('no SSR chunks'); for(const chunk of chunks){const check=spawnSync(process.execPath,['--input-type=module','--check','-'],{input:chunk.code,encoding:'utf8'});if(check.status!==0) throw Error(check.stderr||'ESM syntax failed');} console.log(JSON.stringify({chunks:chunks.map(c=>c.fileName),syntax:'passed',emittedToDisk:false}));"` | Exit 0; 8 módulos transformados, chunk `turn.js` validado como ESM e nenhuma saída escrita em disco. |
+
+Os testes focados exercitam o StateGraph real, o adaptador DeepSeek com transporte simulado, os seis contratos sintéticos SPEC-004, limites/cancelamento, replay/ledger, respostas seguras, isolamento do cliente e negação de acesso privado. O teste opcional com dados sintéticos no DeepSeek não foi executado (`NOT VERIFIED`); deploy e região de produção também seguem `NOT VERIFIED`.
+
 ## Vercel e disponibilidade
 
 Não executar deploy. A verificação local não prova região, plano, domínio, disponibilidade de secrets no projeto Vercel nem identidade server-side. Essas condições permanecem NOT VERIFIED. Mesmo se a função for posteriormente implantada, ela continua fail-closed e não fica disponível a usuários até decisão futura de acesso e dados.

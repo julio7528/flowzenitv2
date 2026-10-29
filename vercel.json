@@ -1,0 +1,9 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "api/agent/turn.js": {
+      "maxDuration": 45,
+      "supportsCancellation": true
+    }
+  }
+}
