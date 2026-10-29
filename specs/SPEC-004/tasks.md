@@ -6,6 +6,8 @@ description: "Dependency-ordered implementation tasks for SPEC-004"
 
 **Input**: Design documents from `specs/SPEC-004/`
 
+**SPEC Version**: 2 (proposta para revisão)
+
 **Prerequisites**: `spec.md`, `plan.md`, `research.md`, `data-model.md`, `contracts/read-tools.md`, and `quickstart.md`.
 
 **Tests**: Required by the SPEC. Tests use synthetic fixtures and an isolated Supabase target only. This document is a future task plan; no task was executed here.
@@ -15,7 +17,7 @@ description: "Dependency-ordered implementation tasks for SPEC-004"
 ## Preconditions and unresolved inputs
 
 - Implementation requires the exact SPEC version in a user-authorized SDD batch and its normal supervisor admission.
-- The DEC-001 access-control gate must be approved, implemented, and verified before any agent endpoint can read private production data. The browser passkey and anonymous grants are not that gate; `service_role` is not an alternative.
+- The DEC-001 access-control gate must be separately approved, implemented, and verified before any agent runtime/endpoint can read private production data. SPEC-001 currently exposes `isAgentAccessGateOpen()` as always false and `withAgentAccess()` never invokes its callback. The browser passkey and anonymous grants are not that gate; `service_role` is not an alternative. Tests must not add a request, environment, or fixture bypass.
 - The proposed page size, text length, date-range bounds, and literal substring search behavior remain subject to user review. They must not be treated as approved executable limits until resolved.
 - DEC-002 and DEC-003 remain binding: use existing demand/task/subtask/routine records and `America/Cuiaba` civil dates.
 
@@ -32,11 +34,11 @@ description: "Dependency-ordered implementation tasks for SPEC-004"
 
 - [ ] T003 [P] Define decimal string IDs, existing entity/status enums, LocalDate validation, query DTOs, and result metadata in `server/domain/read/contracts.js` (FR-001, FR-002, FR-003, FR-004, FR-007, FR-009, FR-015).
 - [ ] T004 [P] Define safe domain errors and public error mapping in `server/domain/read/errors.js`, excluding SQL, keys, stacks, and private payloads (FR-009, FR-011, FR-016).
-- [ ] T005 Implement fixed-column Supabase repository projections and allowlisted filters in `server/domain/read/repository.js`; keep `bigint` IDs as exact decimal strings (FR-001, FR-002, FR-003, FR-014, SC-001).
+- [ ] T005 Implement fixed-column Supabase repository projections and allowlisted filters in `server/domain/read/repository.js`; accept a narrowly injected server-side Supabase client, do not create a client or credential here, and keep `bigint` IDs as exact decimal strings (FR-001, FR-002, FR-003, FR-014, SC-001).
 - [ ] T006 Implement deterministic ordering, bounded pagination, and filter-bound continuation handling in `server/domain/read/pagination.js`; apply only bounds reviewed by the user (FR-002, FR-009, SC-003).
-- [ ] T007 Add a fail-closed access-capability precondition before repository calls in `server/domain/read/access.js`; consume the approved capability supplied by SPEC-001/SPEC-002 and do not create an authentication mechanism here (FR-016, SC-004).
+- [ ] T007 Add the fail-closed access precondition in `server/domain/read/access.js` by calling the SPEC-001 `withAgentAccess()` boundary before repository calls; its current implementation always denies and never invokes the callback. Do not assume an enabled capability is supplied by SPEC-001/SPEC-002, add a bypass, or create authentication here (FR-016, SC-004).
 
-**Checkpoint**: No story may execute a private repository query until the access precondition is satisfied; synthetic unit tests may use injected doubles.
+**Checkpoint**: No agent service/runtime query may reach the repository while the access gate is closed. Repository contract tests may directly use only isolated synthetic data; they do not open the service gate.
 
 ## Phase 3: User Story 1 — Inspect hierarchy and status (Priority: P1)
 
@@ -101,7 +103,7 @@ description: "Dependency-ordered implementation tasks for SPEC-004"
 **Purpose**: Verify access denial, data non-disclosure, integration contracts, and completion evidence across all stories.
 
 - [ ] T024 [P] Add a gate-closed test proving no private repository call occurs in `tests/security/domain-read/access-gate.test.js` (FR-016, SC-004).
-- [ ] T025 [P] Add isolated PostgREST/Supabase contract coverage for exact bigint text projection in `tests/contracts/domain-read/bigint-projection.test.js` (FR-003, SC-001).
+- [ ] T025 [P] Add isolated PostgREST/Supabase contract coverage for exact bigint text projection in `tests/contracts/domain-read/bigint-projection.test.js` using synthetic records and a non-production target; this direct repository contract test does not open the service access gate or authorize endpoint reads (FR-003, SC-001).
 - [ ] T026 Add error/logging tests proving private values, SQL, credentials, and raw Supabase errors are not exposed in `tests/security/domain-read/error-disclosure.test.js` (FR-009, FR-011, FR-016, SC-004).
 - [ ] T027 Update `specs/SPEC-004/quickstart.md` with the implemented commands and observed evidence; record unavailable gates as `NOT VERIFIED` (FR-009, FR-016, SC-003, SC-004).
 - [ ] T028 Run the focused tests, `npm test`, `npm run lint`, and `npm run build` defined in `package.json`; record actual results without inferring unrun checks (FR-001–FR-016, SC-001–SC-005).
@@ -124,7 +126,7 @@ description: "Dependency-ordered implementation tasks for SPEC-004"
 
 ## Implementation strategy
 
-1. Complete the shared boundary and validators, keeping all reads closed unless the approved access capability is present.
+1. Complete the shared boundary and validators while production private reads remain denied under the current DEC-001 implementation. Do not add a capability or bypass; isolated repository contract tests remain separate from service access.
 2. Deliver User Story 1 as the first independently testable increment.
 3. Deliver User Story 2 with exact civil-date semantics and bounded results.
 4. Deliver User Story 3 as a separate template-only read operation.

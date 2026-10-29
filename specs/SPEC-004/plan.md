@@ -1,6 +1,6 @@
 ﻿# Implementation Plan: Domain Contracts and Read Tools
 
-**SPEC ID**: SPEC-004 | **Version**: 1 | **Manifest hash**: atribuído ao criar lote  
+**SPEC ID**: SPEC-004 | **Version**: 2 (proposta para revisão) | **Manifest hash**: atribuído ao criar lote
 **Branch**: main (preservada; nenhuma branch criada) | **Date**: 2026-10-28 | **Spec**: [spec.md](spec.md)  
 **Status**: Draft — plano técnico proposto para revisão, sem aprovação de implementação.
 
@@ -41,12 +41,12 @@ O código futuro fica em módulos JavaScript server-side consumidos pelo runtime
 
 ## Dependencies and Contracts
 
-- **Prerequisite SPECs**: SPEC-001 v2 fornece integração e gate de segurança; é a única dependência declarada no cabeçalho da SPEC-004.
+- **Prerequisite SPECs**: SPEC-001 v2 fornece o gate fail-closed, os erros tipados e o contexto de log seguro; não fornece um cliente Supabase server-side nem um endpoint. Essa é a única dependência declarada no cabeçalho da SPEC-004.
 - **Downstream consumers**: SPEC-002 runtime; SPEC-005 guardrails; SPEC-006/007 mutações e datas; SPEC-008/009 indexação e recuperação. A ordem aprovada continua SPEC-004 → SPEC-002 → SPEC-005.
 - **API/data contracts**: ferramentas internas documentadas em [contracts/read-tools.md](contracts/read-tools.md); não são rotas HTTP. A SPEC-002 expõe o runtime somente depois de seus próprios gates.
 - **Temporal contract**: esta camada aceita datas civis canônicas. A resolução de frases relativas pertence ao runtime/contrato temporal da SPEC-007; SPEC-004 não depende da SPEC-007 para operar sobre datas recebidas.
 - **Database changes**: nenhuma. Migrations existentes são apenas evidência das regras atuais.
-- **Security boundary**: repositório recebe client Supabase já configurado pela camada aprovada; não cria chave privilegiada, sessão ou mecanismo de identidade. Gate DEC-001 precisa estar satisfeito antes de leitura privada em qualquer endpoint de agente.
+- **Security boundary**: o repositório recebe um cliente Supabase server-side estreito por injeção da integração futura do runtime; a SPEC-004 não cria esse cliente, endpoint, credencial, sessão ou mecanismo de identidade. `server/security/accessGate.js` da SPEC-001 permanece incondicionalmente fechado e não chama a operação protegida. O gate DEC-001 precisa estar satisfeito antes de qualquer leitura privada por runtime ou endpoint de agente; nenhum parâmetro, variável de ambiente ou fixture pode abri-lo.
 - **Out-of-scope files/systems**: páginas React, src/lib/supabase.js, schema/policies/grants, migrations, memória, chat, API/runtime, writes, busca semântica/RAG e provedores externos.
 
 ## Domain and Query Design
@@ -87,7 +87,7 @@ Busca textual não existe nas telas atuais. Recomenda-se substring literal sem d
 
 ### Open items for user review
 
-- DEC-012 e revisão do usuário: valores propostos de page size, texto e intervalo; estes limites afetam cobertura e truncamento.
+- Os valores propostos de page size, tamanho do texto e intervalo exigem revisão explícita do usuário; DEC-012 trata limites de uso e abuso de chamadas externas e não aprova estes limites de consulta.
 - Busca textual é nova para o agente: semântica recomendada de substring case-insensitive, literal, ainda não é comportamento aprovado.
 - Cursor de paginação deve ser verificado contra mudanças concorrentes; não afirmar snapshot consistente.
 - DEC-001 continua bloqueando qualquer leitura privada exposta. A SPEC-004 não escolhe o futuro controle de acesso.
@@ -118,15 +118,16 @@ Busca textual não existe nas telas atuais. Recomenda-se substring literal sem d
 | Lint | Yes | npm run lint | Exit 0; nenhuma violação nova. |
 | Build | Yes | npm run build | Exit 0; módulos de leitura permanecem server-side. |
 | Unit/contract | Yes | npm test e doubles | Inputs estritos, hierarquia, status, candidatos, datas, paginação e metadata. |
-| Database | Yes | Fixture sintética em alvo Supabase isolado e não produtivo | Sem migration/grant/RLS; sem acesso privado por endpoint quando gate fechado. |
+| Database | Yes | Teste direto do contrato do repositório contra alvo Supabase/PostgREST isolado, não produtivo, com fixtures sintéticas; testar separadamente o serviço com gate fechado | Projeção `bigint` como texto comprovada; nenhum dado de produto; nenhum endpoint/serviço chama o repositório enquanto o gate estiver fechado; sem migration/grant/RLS novos. A indisponibilidade do alvo impede a aprovação deste gate. |
 | Security | Yes | Testes de gate/DTO/IDs/erros | SQL arbitrário recusado; IDs sem perda; sem exposição antes do gate. |
-| E2E | Conditional | Nenhuma UI existente é alterada por esta SPEC | Executar apenas se uma futura implementação aprovada alterar fluxo visual. |
+| Agent-tool integration/security | Yes | Testes dos serviços internos com doubles e fixtures sintéticas | Vazio, sobreposição, truncamento, não divulgação e nenhuma chamada ao repositório com gate fechado. |
+| Browser E2E/accessibility | Conditional | Nenhuma UI existente é alterada por esta SPEC | Executar apenas se uma futura implementação aprovada alterar fluxo visual. |
 
 ## Entry and Completion Criteria
 
 **Entry for implementation**: SPEC-004 versão exata em lote aprovado e admitido pelo supervisor SDD; SPEC-001 access gate obrigatório para qualquer leitura privada em produção; limites propostos e semântica de busca revisados antes de se tornarem requisito executável; alvo de teste isolado disponível sem dados reais.
 
-**Completion**: operações nomeadas têm contratos e testes; hierarquia/status/agenda/rotina preservam o modelo atual; limites/truncation são explícitos; IDs bigint não perdem precisão; nenhum SQL arbitrário, mutação, entidade nova, migration ou mudança de UI/permissão foi introduzida; leituras privadas continuam bloqueadas quando DEC-001 não foi satisfeita; gates têm evidência real ou NOT VERIFIED.
+**Completion**: operações nomeadas têm contratos e testes; hierarquia/status/agenda/rotina preservam o modelo atual; limites/truncation são explícitos; IDs bigint não perdem precisão; nenhum SQL arbitrário, mutação, entidade nova, migration ou mudança de UI/permissão foi introduzida; leituras privadas continuam bloqueadas quando DEC-001 não foi satisfeita; todos os gates obrigatórios aplicáveis têm evidência `PASS`. Gate obrigatório sem execução ou evidência mantém a SPEC bloqueada; `NOT VERIFIED` só descreve gates explicitamente condicionais ou critérios futuros que não sejam requisito de conclusão desta SPEC.
 
 Conclusão de SPEC-004 não aprova runtime, SPECs downstream ou acesso privado.
 
@@ -141,7 +142,7 @@ specs/SPEC-004/ contém spec.md, plan.md, research.md, data-model.md, quickstart
 server/domain/read/ contém contracts.js (validators/JSDoc), repository.js (projeções/filtros fixos), hierarchy.js, search.js, planning.js, routines.js e pagination.js.
 Testes correspondentes ficam em tests/fixtures/domain-read/, tests/unit/domain-read/, tests/contracts/domain-read/ e tests/integration/domain-read/.
 
-**Structure decision**: módulos ficam fora do grafo de imports do cliente Vite. API entrypoint e access gate pertencem às fronteiras definidas por SPEC-001/SPEC-002; esta SPEC fornece serviços de leitura tipados.
+**Structure decision**: módulos ficam fora do grafo de imports do cliente Vite. Esta SPEC fornece serviços de leitura tipados, sem endpoint HTTP ou cliente Supabase server-side. Um runtime/API consumidor pertence ao planejamento futuro da SPEC-002; o gate reutilizado é o da SPEC-001 e permanece fechado.
 
 ## Official References
 

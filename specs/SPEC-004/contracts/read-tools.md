@@ -32,6 +32,7 @@ Retorna um único item existente com os campos permitidos. ID inválido é `INVA
 - `kinds` limita a `demand|task|subtask`; `statuses` valida os enums existentes por tipo: subtarefa `Backlog|Analise|Executando|Aguardando|Done`; demanda/tarefa `Backlog|Em andamento|Done`.
 - `dateFrom`/`dateTo` são inclusivos e civis; quando ambos informados, o início não excede o fim e a faixa observa o limite configurado.
 - Busca textual proposta é substring literal sem distinção de caixa sobre `demanda`, com caracteres de padrão escapados; não é busca fuzzy/semântica.
+- Locale de comparação, sensibilidade a acentos e normalização Unicode não estão definidos por esta proposta e precisam ser esclarecidos antes de fixar resultados de busca.
 - Resultados múltiplos permanecem candidatos separados; a ferramenta não escolhe silenciosamente. O chamador pede mais contexto quando necessário.
 - Busca semântica/lexical híbrida/RRF é responsabilidade de SPEC-008/009, não desta operação.
 
@@ -83,3 +84,9 @@ Retorna template se o dia ISO da data está em `dias_semana` e `data_inicial <= 
 - Overlaps retornam ambos os itens; rotina respeita weekday ISO e limites inclusivos.
 - Paginação sinaliza truncamento, cursor e ordenação; erro necessário não vira lista vazia nem resultado completo.
 - Gate fechado impede chamadas privadas; testes integrados usam apenas alvo isolado com dados sintéticos.
+
+## Fronteira de integração e segurança
+
+- O repositório recebe um cliente Supabase server-side estreito por injeção; sua criação pertence à integração do runtime e não à SPEC-004. SPEC-001 não fornece um cliente server-side.
+- Antes do repositório, o serviço consulta o gate `withAgentAccess()` de SPEC-001. Na implementação atualmente concluída, o gate sempre nega e não chama a operação protegida. Nenhum request, variável de ambiente ou fixture de teste pode alterar esse resultado.
+- O contrato de banco testa diretamente o repositório somente contra um alvo isolado e sintético; isso não habilita uma leitura pelo serviço ou endpoint nem concede autorização sobre dados de produto.

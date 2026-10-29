@@ -1,7 +1,7 @@
 # Feature Specification: Domain Contracts and Read Tools
 
 **SPEC ID**: SPEC-004  
-**Version**: 1  
+**Version**: 2
 **Dependencies**: [SPEC-001]  
 **Risk**: high
 
@@ -30,7 +30,7 @@
 
 - **Existing contracts**: Current domain is public.demandas with type 1/2/3 and parent ID raizid, daily and weekly allocation in data_exec, local time fields, and a separate recurring table. Preserve observed ordering and status derivation. DEC-002 approves using only these existing entities; no independent appointment entity is part of this version. Date filters and schedule summaries use the civil-date interpretation supplied under America/Cuiaba by SPEC-007; existing date/time values are not shifted through UTC conversions.
 - **Compatibility**: Read APIs are additive and do not change product schema, ordering, status calculation, or schedule rules.
-- **Security and data handling**: All queries use the existing Supabase connection and permission behavior from SPEC-001. Existing anonymous grants do not authorize private-data access through an agent endpoint; reads remain disabled until the SPEC-001 access-control gate is satisfied. User/model input may select supported filters but cannot supply SQL or arbitrary table/column names.
+- **Security and data handling**: The read repository accepts a narrowly injected server-side Supabase client from its eventual runtime integration; SPEC-001 provides the fail-closed access gate and safe error/logging modules, but does not provide a server Supabase client, route, or enabled private capability. The current gate remains closed and does not invoke protected operations. Existing anonymous grants do not authorize private-data access through an agent endpoint. User/model input may select supported filters but cannot supply SQL or arbitrary table/column names.
 - **Dependencies**: [SPEC-001].
 
 ## User Scenarios & Testing
@@ -127,12 +127,13 @@ The application user asks which routine templates apply on a day and can disting
 | Build/type check | Yes | Project production build | Read tool contracts compile in server boundary |
 | Unit/integration tests | Yes | Synthetic domain query fixtures | Hierarchy, filters, date ranges, ambiguity |
 | Database/contract tests | Yes | Isolated Supabase target using existing grants | Synthetic fixtures only; unknown-ID outcomes are stable and agent reads fail closed until the SPEC-001 access-control gate is satisfied; no new RLS policy is assumed |
-| E2E/accessibility/security evaluation | Yes | Agent-tool service tests | Empty, overlap, truncation, non-disclosure |
+| Agent-tool integration/security tests | Yes | Internal service tests with doubles and isolated synthetic data | Empty, overlap, truncation, non-disclosure, and zero repository calls while the access gate is closed |
+| Browser E2E/accessibility | Conditional | Only if an approved implementation changes visible UI | Relevant browser flow and accessibility evidence; no UI change is in this SPEC |
 
 ## Completion Evidence
 
 - [ ] Each query contract has examples and acceptance evidence.
-- [ ] All reads use the existing Supabase connection and typed query contracts; no owner UUID or arbitrary SQL interface is introduced.
+- [ ] Read operations use typed contracts and a narrowly injected server-side Supabase client from the eventual runtime integration; SPEC-001 does not supply that client. No owner UUID or arbitrary SQL interface is introduced, and reads remain inaccessible through the service while the current gate is closed.
 - [ ] No independent appointment/commitment entity is introduced in this version.
 - [ ] No implementation scope outside read operations is included.
 
