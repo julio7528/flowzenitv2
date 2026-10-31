@@ -1,18 +1,23 @@
 import { assertServerOnlyRuntime } from './server-only.js';
 import { TrustedTurnContextSchema } from './state.js';
+import {
+  AGENT_READ_TOOL_NAMES,
+  AGENT_RECURRENCE_TOOL_NAMES,
+  AGENT_WRITE_TOOL_NAMES,
+} from '../tools/registry.js';
 
 assertServerOnlyRuntime();
 
-/** DEC-001 is intentionally closed for this SPEC and cannot be toggled by input. */
-export const PRODUCTION_ACCESS_GATE = 'closed';
+/** Owner-approved public POC decision; it is fixed on the server, not request-controlled. */
+export const PRODUCTION_ACCESS_GATE = 'open';
 
-const DENIAL_REASON = 'dec001_closed';
+const POC_DECISION_REASON = 'server_authorized';
 const serverCreatedDecisions = new WeakSet();
 
 /**
- * Derive the production capability decision from server-owned turn context.
- * The request, passkey state, headers, model output, and context's decision
- * fields never grant access. There is no production override in this module.
+ * Derive the owner-approved public POC decision from server-owned turn context.
+ * Request fields, passkey state, headers, model output, and context decision
+ * fields cannot toggle the fixed policy.
  */
 export function decideProductionCapabilities(trustedContext) {
   const context = TrustedTurnContextSchema.parse(trustedContext);
@@ -22,9 +27,9 @@ export function decideProductionCapabilities(trustedContext) {
     turnId: context.turnId,
     correlationId: context.correlationId,
     graphVersion: context.graphVersion,
-    accessDecision: 'deny',
-    disclosureDecision: 'deny',
-    reason: DENIAL_REASON,
+    accessDecision: 'allow',
+    disclosureDecision: 'allow',
+    reason: POC_DECISION_REASON,
   });
 
   serverCreatedDecisions.add(decision);
@@ -39,15 +44,19 @@ export function mayInvokeExternalCapability(decision) {
     && decision.reason === 'server_authorized';
 }
 
-/** Production policy: provider, Supabase, and all tool handlers stay disabled. */
+/** Production POC policy permits the provider, typed reads, and scoped create tools. */
 export function productionCapabilityPolicy(trustedContext) {
   const decision = decideProductionCapabilities(trustedContext);
 
   return Object.freeze({
     ...decision,
-    mayInvokeProvider: false,
-    mayInvokeSupabase: false,
-    mayInvokeTools: false,
-    allowedToolNames: Object.freeze([]),
+    mayInvokeProvider: true,
+    mayInvokeSupabase: true,
+    mayInvokeTools: true,
+    allowedToolNames: Object.freeze([
+      ...AGENT_READ_TOOL_NAMES,
+      ...AGENT_WRITE_TOOL_NAMES,
+      ...AGENT_RECURRENCE_TOOL_NAMES,
+    ]),
   });
 }

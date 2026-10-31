@@ -1,38 +1,34 @@
-# Contrato de histórico de conversa — SPEC-003
+# Contrato de histórico de conversa — SPEC-003@3
 
-**Estado:** contrato interno proposto, Draft. Endpoint/route permanece desabilitado por DEC-001 e DEC-005.
+**Estado**: contrato interno aprovado para implementação e fixtures sintéticas. Nenhum endpoint privado fica habilitado.
 
 ## Request e response
 
-```text
-HistoryRequest = {
-  conversationId: OpaqueConversationId,
-  cursor?: OpaqueHistoryCursor,
-  pageSize?: bounded integer
-}
+HistoryRequest contém conversationId, cursor opcional e pageSize opcional. ID é UUID opaco e validado; não autentica.
 
-HistoryPage = {
-  conversationId: OpaqueConversationId,
-  messages: [{ messageId, messageSeq, turnId, role, content, createdAt }],
-  nextCursor: OpaqueHistoryCursor | null,
-  snapshotMaxMessageSeq: integer,
-  outcome: "ok" | "empty" | "invalid_id" | "not_found" | "access_disabled" | "unavailable"
-}
-```
+HistoryPage contém conversationId, mensagens canônicas, nextCursor ou null, snapshotMaxMessageSeq e outcome: ok, empty, invalid_id, not_found, access_disabled, expired ou unavailable.
 
-`pageSize` precisa ser validado e limitado por configuração aprovada; nenhum default numérico é fixado nesta SPEC. Conteúdo por message segue allowlist. Ferramentas podem aparecer como role `tool` somente em resumo visível permitido; checkpoint, prompt, tool args/raw result e hidden reasoning nunca aparecem.
+Cada mensagem tem messageId, messageSeq, turnId, role, content allowlisted e createdAt. Checkpoints, resumos, prompts ocultos, argumentos/resultados privados de tool e reasoning não são messages.
 
-## Cursor e ordem
+## Paginação e cursor
 
-- `messageSeq` é único por conversa, gerado transacionalmente e ordenado ascendente.
-- Primeira página guarda `snapshotMaxMessageSeq`; cursor contém versão, limite do snapshot e última sequência devolvida. Páginas seguintes consultam somente `lastMessageSeq < seq <= snapshotMaxMessageSeq`.
-- Cursor é opaque para compatibilidade, mas não segredo/autorização. Request com cursor de outra conversa, versão desconhecida ou campos alterados retorna validation/stable failure sem dados.
-- Conversa nova retorna `outcome=empty`, `messages=[]`, sem checkpoint false-positive. IDs malformed e IDs desconhecidos têm categorias estáveis, sem SQL/stack details.
+- pageSize default 50; valores válidos de 1 a 100.
+- Ordem ascendente e determinística por messageSeq.
+- Primeira página captura snapshotMaxMessageSeq. Cursor inclui versão, conversationId, pageSize, snapshot máximo e última sequência devolvida.
+- Cursor é codificado opacamente e autenticado por HMAC-SHA-256 usando chave server-only injetada de pelo menos 32 bytes; comparação timing-safe.
+- Cursor de outra conversa, tamanho diferente, formato/versão inválida ou MAC incorreto falha antes da consulta de conteúdo.
+- Continuação consulta lastMessageSeq < messageSeq <= snapshotMaxMessageSeq.
+- O cursor não é autorização. Gate DEC-001 antecede validação com storage e toda leitura.
+- Novas mensagens acima do snapshot ficam para uma nova paginação; não se promete snapshot MVCC entre requisições. Conversa expirada/deleting falha fechada mesmo com cursor válido.
 
-## Append e duplicatas
+## Append e idempotência
 
-Append de user/final assistant/tool summary inclui `turnId` e idempotency reference do servidor. Retry do mesmo request devolve mensagem/outcome já persistido. Request hash diferente associado à mesma chave retorna conflito e não cria message. Mensagens de turno só são expostas após seu status/resposta estar autorizado/terminal conforme o contrato do endpoint; a decisão de streaming fica em SPEC-002/012.
+Turn request tem idempotencyKey server-side e hash canônico do payload. Mesma chave e mesmo hash retorna o turno/mensagens já persistidos; mesmo identificador com hash diferente resulta em conflict seguro. Reserva, message sequence, append e renovação de last_activity_at são serializados em transação por conversa.
 
-## Privacidade
+Mensagens visíveis só incluem user, assistant final e tool summary explicitamente allowlisted. Redação de tool não expõe payload bruto ou estado oculto. Erros e logs contêm apenas outcome category e correlation segura.
 
-Gate DEC-001 antes do repository; ID/cursor não autorizam. Nunca aceitar `ownerId`/role do browser. Não reutilizar dados de SDD, nem retornar graph state ou checkpoint metadata. Logs contêm correlation ID, outcome category, duration e counts allowlisted; sem conteúdo, ids em claro, prompts ou tool results brutos. Persistência de produção permanece bloqueada até DEC-005; provider flow bloqueado até DEC-006.
+## Export e privacidade
+
+Export DTO interno é objeto JSON versionado com conversation metadata mínima e mensagens canônicas paginadas/ordenadas. Exclui credentials, hidden reasoning, checkpoint bruto, ledger refs privadas, tool payloads e summaries apresentados como transcript. Não há route ou endpoint export sob DEC-001 fechado.
+
+ConversationId, request ID e cursor não autenticam. Não aceitar ownerId/role do browser. Com DEC-001 fechado, retornar access_disabled antes de qualquer operação privada.

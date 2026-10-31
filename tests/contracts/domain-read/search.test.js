@@ -63,6 +63,55 @@ test('unknown query-expression fields are rejected before repository access', as
   assert.equal(repositoryCalls, 0);
 });
 
+test('empty searches return current complete metadata without requesting narrowing', async () => {
+  const result = await searchItems({
+    async searchItems() {
+      return { items: [], hasMore: false, nextCursor: null };
+    },
+  }, { text: 'synthetic no match' });
+
+  assert.deepEqual(result.items, []);
+  assert.deepEqual(result.candidates, []);
+  assert.equal(result.requiresNarrowing, false);
+  assert.equal(result.metadata.completeness, 'complete');
+  assert.equal(result.metadata.freshness, 'fresh');
+  assert.equal(typeof result.metadata.readAt, 'string');
+});
+
+test('search dependency errors become bounded public errors', async () => {
+  const error = await publicError(() => searchItems({
+    async searchItems() {
+      throw new Error('synthetic private database detail');
+    },
+  }, { text: 'synthetic query' }));
+
+  assert.equal(error?.code, 'DEPENDENCY_UNAVAILABLE');
+  assert.doesNotMatch(JSON.stringify(error), /private database detail/);
+});
+
+test('search candidates preserve persistent identity and current hierarchy provenance', async () => {
+  const row = fixtures.demandas.find((candidate) => candidate.id === fixtures.ids.overlappingSubtaskA);
+  const rowsById = new Map(fixtures.demandas.map((candidate) => [candidate.id, candidate]));
+  const result = await searchItems({
+    async searchItems() {
+      return { items: [row], hasMore: false, nextCursor: null };
+    },
+    async getItemById(id) {
+      return rowsById.get(id) ?? null;
+    },
+  }, { text: row.demanda });
+
+  assert.equal(result.items[0].id, row.id);
+  assert.deepEqual(result.candidates[0].sourceRef, { kind: 'subtask', id: row.id });
+  assert.equal(result.candidates[0].kind, 'subtask');
+  assert.equal(result.candidates[0].parentId, row.raizid);
+  assert.deepEqual(result.candidates[0].hierarchyContext.map((ancestor) => ancestor.sourceRef), [
+    { kind: 'demand', id: fixtures.ids.demandWithHierarchy },
+    { kind: 'task', id: fixtures.ids.taskWithSchedule },
+  ]);
+  assert.equal(result.metadata.freshness, 'fresh');
+});
+
 test('ambiguous literal search keeps duplicate-name records as separate candidates', async () => {
   const duplicateRows = fixtures.demandas.filter((row) => row.id === fixtures.ids.overlappingSubtaskA
     || row.id === fixtures.ids.overlappingSubtaskB);

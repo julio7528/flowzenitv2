@@ -1,3 +1,11 @@
+## Current POC applicability ? SPEC-012@2
+
+Deliver the existing-app chat UI for typed reads, SPEC-009 RAG, task/subtask creation, and routine query/create. Keep active context in memory, show the POC/model disclosure, and add no persistent history.
+
+This note controls this file when older proposal text below conflicts. For current implementation scope and acceptance criteria, use the SPEC top-level spec.md, plan.md, and tasks.md.
+
+---
+
 # Research: SPEC-012 Chat Interface
 
 **Status**: Draft research record. Findings are limited to the current checkout and existing Draft contracts; recommendations below are proposals, not approvals.

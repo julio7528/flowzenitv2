@@ -3,13 +3,14 @@ import assert from 'node:assert/strict'
 import { createSyntheticAgentRequest } from '../../fixtures/agentBoundary.js'
 import { isAgentAccessGateOpen, withAgentAccess } from '../../../server/security/accessGate.js'
 
-test('o gate de acesso privado permanece fechado sem configuração ou solicitação', () => {
-  assert.equal(isAgentAccessGateOpen(), false)
-  assert.equal(isAgentAccessGateOpen(true), false)
-  assert.equal(isAgentAccessGateOpen({ enabled: true, verified: true }), false)
+test('a decisão pública de POC permanece aberta e não depende da solicitação', () => {
+  assert.equal(isAgentAccessGateOpen(), true)
+  assert.equal(isAgentAccessGateOpen(true), true)
+  assert.equal(isAgentAccessGateOpen({ enabled: false, verified: false }), true)
+  assert.equal(isAgentAccessGateOpen({ enabled: true, verified: true }), true)
 })
 
-test('passkey, sessionStorage e campos do navegador não abrem o gate', () => {
+test('passkey e campos do navegador não alteram a decisão nem os dados do callback servidor', async () => {
   const request = createSyntheticAgentRequest({
     browserState: {
       passkeyUnlocked: true,
@@ -17,23 +18,23 @@ test('passkey, sessionStorage e campos do navegador não abrem o gate', () => {
     },
     headers: { 'x-client-authorized': 'true' },
     clientAuthorized: true,
+    body: { accessDecision: 'deny', modelOutput: { accessDecision: 'deny' } },
   })
 
-  assert.equal(isAgentAccessGateOpen(request), false)
-  assert.deepEqual(withAgentAccess(request, async () => ({ privateRecord: true })), {
-    ok: false,
-    error: { code: 'CAPABILITY_DISABLED', message: 'Capability unavailable' },
+  let callbackArguments
+  const result = await withAgentAccess(request, async (...args) => {
+    callbackArguments = args
+    return { status: 'synthetic-allowed' }
   })
+
+  assert.equal(isAgentAccessGateOpen(request), true)
+  assert.deepEqual(result, { status: 'synthetic-allowed' })
+  assert.deepEqual(callbackArguments, [])
 })
 
-test('uma solicitação negada não chama a operação protegida', () => {
-  let calls = 0
-  const result = withAgentAccess(createSyntheticAgentRequest(), async () => {
-    calls += 1
-    return { privateRecord: true }
-  })
+test('callback inválido recebe a negação segura sem criar privilégios Supabase', async () => {
+  const result = await withAgentAccess(createSyntheticAgentRequest(), null)
 
   assert.equal(result.ok, false)
   assert.equal(result.error.code, 'CAPABILITY_DISABLED')
-  assert.equal(calls, 0)
 })

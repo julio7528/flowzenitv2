@@ -1,6 +1,14 @@
+## Current POC applicability ? SPEC-005@2
+
+Allow typed reads/search and one clear create_task, create_subtask, or create_routine_series action. Clarify missing/ambiguous fields. Other mutations and any extra confirmation-store/ledger design are outside this POC.
+
+This note controls this file when older proposal text below conflicts. For current implementation scope and acceptance criteria, use the SPEC top-level spec.md, plan.md, and tasks.md.
+
+---
+
 # Research: SPEC-005 guardrails and action authorization
 
-**Date:** 2026-10-28  
+**Date:** 2026-10-28
 **Status:** Planning evidence only. DEC-009 remains pending; no action confirmation policy is approved here.
 
 ## Repository and contract baseline

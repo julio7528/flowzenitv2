@@ -15,8 +15,8 @@
 | `SPEC-005` | Guardrails, autorização de ações e confirmações | `SPEC-001`, `SPEC-002`, `SPEC-004` | Crítico | Instruções não confiáveis não ampliam ferramentas; cada ação é autorizada no servidor. |
 | `SPEC-006` | Ferramentas de escrita para demandas e planejamento | `SPEC-004`, `SPEC-005` | Crítico | Criar, editar, concluir e reagendar preserva hierarquia, status, idempotência e regras atuais. |
 | `SPEC-007` | Interpretação temporal e recorrências | `SPEC-004`, `SPEC-005`, `SPEC-006` | Alto | Datas relativas, horários, recorrências e exceções são interpretados sem ambiguidade nem perda de alocação. |
-| `SPEC-008` | Gemini Embedding, pgvector e indexação incremental | `SPEC-001`, `SPEC-004` | Alto | Alterações da fonte relacional atualizam o índice de forma idempotente e recuperável. |
-| `SPEC-009` | Busca híbrida, RRF e grounding | `SPEC-002`, `SPEC-004`, `SPEC-005`, `SPEC-008` | Alto | Busca lexical e vetorial melhora resultados medidos sem substituir consultas transacionais. |
+| SPEC-008 | Fonte lexical do RAG no PostgreSQL Supabase | SPEC-001, SPEC-004 | Médio | Reusa a busca atual sem cópia ou infraestrutura de indexação.
+| SPEC-009 | RAG textual e grounding no Supabase | SPEC-001, SPEC-002, SPEC-004, SPEC-008 | Alto | Respostas citadas apoiadas em busca Postgres e leituras exatas.
 | `SPEC-010` | LangSmith, tracing e auditoria persistente | `SPEC-001`, `SPEC-002`, `SPEC-005` | Alto | Execuções têm IDs correlacionáveis e eventos seguros, com dados sensíveis redigidos. |
 | `SPEC-011` | Dashboard administrativo de observabilidade | `SPEC-010` | Médio | O usuário da aplicação inspeciona execução, estado das integrações e eventos suspeitos pelos mecanismos de acesso existentes. |
 | `SPEC-012` | Chat integrado ao FlowZenit | `SPEC-002`, `SPEC-003`, `SPEC-004`, `SPEC-005`, `SPEC-006`, `SPEC-007` | Alto | O proprietário consulta e gerencia dados com histórico, confirmação e feedback acessíveis quando as capacidades protegidas passarem pelo gate da DEC-001. |
@@ -29,7 +29,7 @@
 1. Fundação e gates: `SPEC-001` → `SPEC-013` → `SPEC-014`.
 2. Contexto e runtime: `SPEC-004` → `SPEC-002` → `SPEC-005`.
 3. Mutação controlada: `SPEC-006` → `SPEC-007`.
-4. Persistência e recuperação semântica: `SPEC-003` e `SPEC-008` (independentes após as dependências) → `SPEC-009`.
+4. Memória e recuperação textual: `SPEC-003` e `SPEC-008` (independentes após as dependências) → `SPEC-009`.
 5. Operação e interface: `SPEC-010` → `SPEC-011`; `SPEC-012` após as ferramentas e memória necessárias.
 6. Pesquisa externa: `SPEC-015`, somente após política de saída de dados e controles de segurança aprovados.
 

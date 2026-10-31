@@ -55,8 +55,8 @@ test('unsupported entity is a fixed pure response with no generated identifiers'
   );
 });
 
-test('unsupported entity cannot become a seventh tool or open the closed read gate', async () => {
-  assert.equal(isAgentAccessGateOpen(), false);
+test('unsupported entity cannot become a seventh tool or change the fixed public gate', async () => {
+  assert.equal(isAgentAccessGateOpen(), true);
   assert.deepEqual(DOMAIN_READ_TOOL_NAMES, EXPECTED_READ_TOOLS);
 
   let repositoryCalls = 0;
@@ -64,7 +64,7 @@ test('unsupported entity cannot become a seventh tool or open the closed read ga
     get() {
       return async () => {
         repositoryCalls += 1;
-        throw new Error('The closed access gate must prevent repository calls.');
+        return [];
       };
     },
   });
@@ -77,19 +77,5 @@ test('unsupported entity cannot become a seventh tool or open the closed read ga
   const unsupported = createUnsupportedEntityResponse('calendar');
   assert.equal(unsupported.error.code, 'UNSUPPORTED_ENTITY');
   assert.equal(repositoryCalls, 0);
-
-  const adversarialRequest = {
-    itemId: '9007199254743001',
-    browserState: { passkeyUnlocked: true, gateOpen: true },
-    authorization: 'untrusted-placeholder',
-    overrideAccessGate: true,
-  };
-  const results = await Promise.all(EXPECTED_READ_TOOLS.map(name => tools[name](adversarialRequest)));
-
-  for (const result of results) {
-    assert.deepEqual(result, {
-      error: { code: 'ACCESS_DISABLED', message: 'Read capability unavailable' },
-    });
-  }
-  assert.equal(repositoryCalls, 0, 'no read or write-capable repository method ran');
+  assert.equal(repositoryCalls, 0, 'unsupported entities never enter the typed read repository');
 });

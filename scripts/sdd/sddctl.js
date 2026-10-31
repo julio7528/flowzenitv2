@@ -39,6 +39,92 @@ export function parseDependencies(specText) {
   return [...new Set(values.map((item) => item.trim().replace(/^['"]|['"]$/g, '')).filter(Boolean))];
 }
 
+export function parseGateWaiverPolicies(planText) {
+  const heading = /^##\s+Gate waiver policies\s*$/im;
+  const match = heading.exec(planText);
+  if (!match) return {};
+  const start = match.index + match[0].length;
+  const rest = planText.slice(start);
+  const nextHeading = /^##\s+/m.exec(rest);
+  const section = nextHeading ? rest.slice(0, nextHeading.index) : rest;
+  const policies = {};
+  const allowedPolicies = new Set([
+    'NEVER',
+    'ALTERNATIVE_EVIDENCE',
+    'UNAVAILABLE',
+    'ALTERNATIVE_AND_UNAVAILABLE',
+  ]);
+  for (const line of section.split(/\r?\n/)) {
+    if (!/^\s*\|/.test(line)) continue;
+    const columns = line.split('|').slice(1, -1).map((column) => column.trim());
+    if (columns.length < 2 || /^:?-{3,}:?$/.test(columns[0]) || /^gate\s*key$/i.test(columns[0])) continue;
+    const [gateKey, policyValue] = columns;
+    const policy = policyValue.toUpperCase();
+    if (!/^[a-z0-9][a-z0-9._-]*$/i.test(gateKey)) {
+      throw new Error(`Invalid gate key in Gate waiver policies: ${gateKey}.`);
+    }
+    if (!allowedPolicies.has(policy)) {
+      throw new Error(`Invalid waiver policy for ${gateKey}: ${policyValue}.`);
+    }
+    if (Object.hasOwn(policies, gateKey)) throw new Error(`Duplicate waiver policy for gate ${gateKey}.`);
+    policies[gateKey] = policy;
+  }
+  return policies;
+}
+
+export function validateGateWaiverRequest({ batch, runId, gateKey, basis, exitCode, failureId, unavailableReason }) {
+  if (!batch || !['RUNNING', 'PAUSED'].includes(batch.state)) {
+    throw new Error('O lote precisa estar RUNNING ou PAUSED.');
+  }
+  const item = batch.specs?.find((spec) => spec.run_id === runId);
+  if (!item || batch.current_spec_id !== item.spec_id) {
+    throw new Error('O RUN precisa pertencer à SPEC atual da posição exata do lote.');
+  }
+  const gate = (item.quality_gates || []).find((candidate) => candidate.gate_key === gateKey);
+  if (!gate || !gate.required || !['FAILED', 'SKIPPED'].includes(gate.state)) {
+    throw new Error('Apenas um gate requerido em FAILED ou SKIPPED pode ser preparado para waiver.');
+  }
+  const eligiblePolicies = {
+    ALTERNATIVE_EVIDENCE: ['ALTERNATIVE_EVIDENCE', 'ALTERNATIVE_AND_UNAVAILABLE'],
+    UNAVAILABLE: ['UNAVAILABLE', 'ALTERNATIVE_AND_UNAVAILABLE'],
+  };
+  if (!eligiblePolicies[basis]) throw new Error('Basis de waiver inválido.');
+  if (!eligiblePolicies[basis].includes(gate.waiver_policy || 'NEVER')) {
+    throw new Error(`O snapshot imutável define ${gate.waiver_policy || 'NEVER'} para ${gateKey}; este waiver não é elegível.`);
+  }
+  if (basis === 'ALTERNATIVE_EVIDENCE') {
+    if (gate.state !== 'FAILED' || exitCode !== '0') {
+      throw new Error('ALTERNATIVE_EVIDENCE exige gate FAILED e exit code 0 para a evidência alternativa.');
+    }
+    if (failureId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(failureId)) {
+      throw new Error('--failure precisa ser um UUID.');
+    }
+  } else if (gate.state !== 'SKIPPED' || failureId || !unavailableReason?.trim()) {
+    throw new Error('UNAVAILABLE exige gate SKIPPED, motivo ambiental e não aceita --failure.');
+  }
+  return { item, gate };
+}
+
+export function validateStatusGateReporting(status) {
+  const outcomes = new Set(['PENDING', 'RUNNING', 'PASSED', 'FAILED', 'SKIPPED', 'WAIVED']);
+  for (const batch of status?.batches || []) {
+    for (const spec of batch.specs || []) {
+      for (const gate of spec.quality_gates || []) {
+        if (!outcomes.has(gate.state)) throw new Error(`Unknown quality gate outcome in status: ${gate.state}.`);
+        if (gate.state === 'WAIVED') {
+          const waiver = gate.waiver;
+          if (!gate.required || !waiver?.waiver_id || !waiver.approved_by || !waiver.reason || !waiver.evidence_ref) {
+            throw new Error(`WAIVED gate ${gate.gate_key} is missing its required owner authorization report.`);
+          }
+        } else if (gate.waiver?.waiver_id) {
+          throw new Error(`Non-WAIVED gate ${gate.gate_key} contains a waiver authorization report.`);
+        }
+      }
+    }
+  }
+  return status;
+}
+
 export function parseSpecVersion(specText) {
   const match = specText.match(/^\s*(?:\*\*)?version(?:\*\*)?\s*:\s*`?(\d+)`?\s*$/mi);
   const version = Number(match?.[1] || 1);
@@ -188,6 +274,7 @@ async function registerSpec(client, directory, actor, suppliedIdempotencyKey) {
     throw new Error('A SPEC precisa conter spec.md, plan.md e tasks.md antes do registro.');
   }
   const specText = files.find((file) => file.path.toLowerCase() === 'spec.md').content;
+  const planText = files.find((file) => file.path.toLowerCase() === 'plan.md').content;
   const title = specText.match(/^#\s+(.+)$/m)?.[1]?.trim();
   if (!title) throw new Error('Inclua um título de nível 1 em spec.md.');
   const version = parseSpecVersion(specText);
@@ -201,7 +288,7 @@ async function registerSpec(client, directory, actor, suppliedIdempotencyKey) {
     p_content_hash: contentHash,
     p_source_paths: sourcePaths,
     p_dependencies: parseDependencies(specText),
-    p_snapshot: { documents: docs },
+    p_snapshot: { documents: docs, gate_waiver_policies: parseGateWaiverPolicies(planText) },
     p_registered_by: actor,
     p_idempotency_key: suppliedIdempotencyKey
       || stableIdempotencyKey('register-spec-version', { specId, version, contentHash }),
@@ -221,14 +308,14 @@ async function getBatchStatus(client, batchId) {
 async function main(argv) {
   const [command, ...args] = argv;
   if (!command || command === '--help' || command === 'help') {
-    print(`FlowZenit SDD supervisor\n\nComandos:\n  health\n  status [LOTE]\n  events LOTE [EVENT_ID_INICIAL]\n  register specs/ID --by AUTOR [--key UUID]\n  create-batch NOME SPEC@VERSÃO... --by AUTOR [--key UUID]\n  validate LOTE\n  prepare-approval LOTE --by AUTOR\n  claim LOTE --owner ID [--key UUID]\n  heartbeat LOTE --lease UUID --owner ID\n  next LOTE --lease UUID --owner ID\n  record RPC --json JSON\n  recover LOTE\n  prepare-resume LOTE --by AUTOR --reason MOTIVO --owner ID\n  prepare-extension LOTE SPEC TENTATIVAS SEGUNDOS --by AUTOR --reason MOTIVO\n\nAprovação, extensão e retomada exigem a conexão administrativa do Supabase. O CLI apenas prepara o SQL; não executa essas autorizações.`);
+    print(`FlowZenit SDD supervisor\n\nComandos:\n  health\n  status [LOTE]\n  events LOTE [EVENT_ID_INICIAL]\n  register specs/ID --by AUTOR [--key UUID]\n  create-batch NOME SPEC@VERSÃO... --by AUTOR [--key UUID]\n  validate LOTE\n  prepare-approval LOTE --by AUTOR\n  prepare-waiver LOTE RUN GATE --basis ALTERNATIVE_EVIDENCE|UNAVAILABLE --by AUTOR --reason MOTIVO --evidence-ref REF --method MÉTODO [--exit-code 0 | --unavailable-reason MOTIVO] [--failure UUID]\n  claim LOTE --owner ID [--key UUID]\n  heartbeat LOTE --lease UUID --owner ID\n  next LOTE --lease UUID --owner ID\n  record RPC --json JSON\n  recover LOTE\n  prepare-resume LOTE --by AUTOR --reason MOTIVO --owner ID\n  prepare-extension LOTE SPEC TENTATIVAS SEGUNDOS --by AUTOR --reason MOTIVO\n\nAprovação, extensão, retomada e waiver exigem a conexão administrativa do Supabase. O CLI apenas prepara o SQL; não executa essas autorizações.`);
     return;
   }
-  if (!RUNNER_RPCS.has(command) && !['health', 'status', 'events', 'register', 'create-batch', 'validate', 'prepare-approval', 'claim', 'heartbeat', 'next', 'record', 'recover', 'prepare-resume', 'prepare-extension'].includes(command)) {
+  if (!RUNNER_RPCS.has(command) && !['health', 'status', 'events', 'register', 'create-batch', 'validate', 'prepare-approval', 'prepare-waiver', 'claim', 'heartbeat', 'next', 'record', 'recover', 'prepare-resume', 'prepare-extension'].includes(command)) {
     throw new Error(`Comando desconhecido: ${command}. Use sddctl help.`);
   }
 
-  if (command === 'prepare-resume' || command === 'prepare-extension' || command === 'prepare-approval') {
+  if (command === 'prepare-resume' || command === 'prepare-extension' || command === 'prepare-approval' || command === 'prepare-waiver') {
     const { values, flags } = parseFlags(args);
     const client = await createSupabaseClient();
     if (command === 'prepare-approval') {
@@ -240,6 +327,40 @@ async function main(argv) {
       if (error) throw error;
       if (!data?.valid || batch.state !== 'READY_FOR_APPROVAL') throw new Error('O lote precisa estar válido e aguardando aprovação.');
       print(prepareApprovalSql({ batchId, manifestHash: batch.manifest_hash, approvedBy }));
+      return;
+    }
+    if (command === 'prepare-waiver') {
+      const [batchId, runId, gateKey] = values;
+      if (!batchId || !runId || !gateKey) throw new Error('Use: prepare-waiver LOTE RUN GATE --basis ...');
+      const approvedBy = required(flags, 'by');
+      const reason = required(flags, 'reason');
+      const evidenceRef = required(flags, 'evidence-ref');
+      const method = required(flags, 'method');
+      const basis = required(flags, 'basis').toUpperCase();
+      if (!['ALTERNATIVE_EVIDENCE', 'UNAVAILABLE'].includes(basis)) {
+        throw new Error('--basis precisa ser ALTERNATIVE_EVIDENCE ou UNAVAILABLE.');
+      }
+      if (reason.length > 1000 || evidenceRef.length > 500) {
+        throw new Error('--reason aceita até 1000 caracteres e --evidence-ref até 500.');
+      }
+      const batch = await getBatchStatus(client, batchId);
+      validateGateWaiverRequest({
+        batch, runId, gateKey, basis, exitCode: flags['exit-code'],
+        failureId: flags.failure, unavailableReason: flags['unavailable-reason'],
+      });
+      const evidence = { method, evidence_ref: evidenceRef };
+      const failureId = flags.failure || null;
+      if (basis === 'ALTERNATIVE_EVIDENCE') {
+        evidence.exit_code = 0;
+      } else {
+        evidence.unavailable_reason = required(flags, 'unavailable-reason');
+      }
+      const confirmation = `WAIVE ${batchId} ${batch.manifest_hash} ${runId} ${gateKey}`;
+      const evidenceJson = `${sqlLiteral(JSON.stringify(evidence))}::jsonb`;
+      print([
+        '-- Execute only through the privileged Supabase SQL/MCP channel after the owner authorizes this exact waiver.',
+        `SELECT public.sdd_authorize_gate_waiver(${sqlLiteral(batchId)}, ${sqlLiteral(batch.manifest_hash)}, ${sqlLiteral(runId)}, ${sqlLiteral(gateKey)}, ${sqlLiteral(basis)}, ${sqlLiteral(approvedBy)}, ${sqlLiteral(reason)}, ${evidenceJson}, ${failureId ? sqlLiteral(failureId) : 'NULL'}, ${sqlLiteral(confirmation)}, ${sqlLiteral(randomUUID())});`,
+      ].join('\n'));
       return;
     }
     if (command === 'prepare-resume') {
@@ -279,7 +400,7 @@ async function main(argv) {
   if (command === 'status') {
     const { data, error } = await client.rpc('sdd_status', { p_batch_id: args[0] || null });
     if (error) throw error;
-    print(data);
+    print(validateStatusGateReporting(data));
     return;
   }
   if (command === 'events') {

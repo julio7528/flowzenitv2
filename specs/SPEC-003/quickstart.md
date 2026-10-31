@@ -1,28 +1,30 @@
-# Validação futura — SPEC-003
+# Validação e operação — SPEC-003@4
 
-Roteiro para a implementação autorizada futuramente. Nada foi persistido/executado no planejamento. Até DEC-001, DEC-005 e DEC-006 serem satisfeitas, usar apenas doubles e banco de teste isolado com dados sintéticos; sem endpoints privados, LangSmith ou provedor real.
+**Lote**: `e52e1b23-e9d9-49ec-bb06-c2438a1fe7f8`
+**Manifesto**: `d792b4cf5f48ea52d636561f8259cb52c040827bf9d299e493d4f9eba65f56e9`
+**Snapshot**: `859895764ca7898123bdee6c0a19ccceff8446762e74fcb68a05970704b1b8b4`
+**Estado documentado**: tarefas T001–T005 concluídas; auditoria independente T006 pendente.
 
-## Pré-condições futuras
+## Escopo da POC
 
-- SPEC-001/002 compatíveis; runtime/checkpointer e adapter selecionados sob DEC-010.
-- DEC-001 control de acesso aprovado, implementado e verificado para any private endpoint.
-- DEC-005 policy version aprovada para retention/deletion/export/share; DEC-006 aprovada antes de qualquer summary/provider content.
-- Database test local/isolation tag não produtivo; nenhuma tabela `sdd` reutilizada.
-- Fixed clock, synthetic conversation IDs, deterministic graph/model/tool doubles e fake ledger.
+- Único banco: Supabase PostgreSQL de desenvolvimento `flowzenithv2`, projeto `twikxeloeftczwbpjvzr`, PostgreSQL 17.11.
+- Sem Docker, PostgreSQL local, branch de banco ou teste de conexão TCP do Node.
+- DEC-001 continua fechado; nenhum endpoint privado nem persistência de conversa real foi habilitado.
+- Testes Node com doubles validam contratos do adapter/LangGraph. SQL MCP valida o PostgreSQL real; uma evidência não substitui a outra.
 
-## Cenários de verificação
+## Resultados observados neste run
 
-1. `npm test`: histórico vazio retorna outcome explícito; IDs malformados/desconhecidos retornam categorias estáveis sem stack/data.
-2. Inserir mensagens sintéticas com mesmo timestamp e concorrência; verificar sequência monotônica e páginas estáveis pelo snapshot cursor, sem gap/duplicação ao inserir novas mensagens após primeira página.
-3. Repetir o mesmo request/turn idempotency key; verificar no máximo uma mensagem user/final assistant visível e uma chamada de cada tool concluída.
-4. Rodar duas mensagens concorrentes para mesmo conversation ID; validar o comportamento configurado `serialized` ou `TURN_IN_PROGRESS` sem sequência duplicada e sem context cross-contamination. IDs distintos não compartilham conteúdo.
-5. Simular checkpoint absent, malformed JSON, digest mismatch, graph/state/serializer version mismatch e expiry fixture; assegurar zero tool invocations.
-6. Checkpoint com tool ledger `completed`: resultado anterior sem side effect; `not_started`: só retomar de checkpoint seguro; `started/uncertain/missing`: negar ferramenta até reconciliação.
-7. Interromper provider/node e cancelar request; terminal state não é `completed` sem ledger/outcome. Retry do request não duplica mensagem nem repete ferramenta completa.
-8. Testar context builder com budget artificial pequeno; preserva limites, `throughMessageSeq`/coverage corretos, histórico canônico byte-for-byte unchanged e domain facts typed (não summary) para consultas exatas.
-9. Summary stale após nova mensagem ou mudança de versão é ignorado/regenerado via stub; confirmar que summary não atravessa conversa nem aparece como transcript/tool permission.
-10. Exclusão sob policy fixture sintética: apagar transcript, checkpoints, summaries e cache; uma execução ativa é cancelada/reconciliada; tentativas concorrentes são idempotentes; `deleting` não retorna conteúdo.
-11. Security sentinel: DEC-001 closed produz zero repository/checkpointer calls; nenhum ID/cursor autentica; transcript/checkpoint/tool args não aparecem em log, audit, trace, browser bundle ou error response.
-12. Executar `npm test`, `npm run lint`, `npm run build` e teste de DB LangGraph isolado; registrar commands, exit codes e evidência redacted. Checks não executados ficam `NOT VERIFIED`.
+- Os testes Node/LangGraph direcionados passaram: **92 testes, 0 falhas, 0 skips**. Incluíram o adapter de checkpoint com doubles, lifecycle, exclusão/recuperação, redaction, cursores e server boundary.
+- `npm test`: exit code **0**, 357 testes, 355 aprovados, 0 falhas e 2 skips.
+- `rtk proxy npm run lint`: exit code **0**.
+- `npm run build`: exit code **0**, 165 módulos transformados.
+- Supabase SQL MCP: schema `conversation_private` presente com 10 tabelas; as 10 têm RLS habilitado e nenhuma policy. Não foram encontrados grants de schema/tabela para PUBLIC, anon, authenticated ou service_role. As versões do checkpointer no banco são 0–5.
+- A transação SQL sintética testou constraints de sequência, role e retenção, limite de expiração do envelope, inserção válida, cascade de artefatos e rollback. A consulta posterior encontrou zero fixture ou resíduo.
+- A lista de schemas expostos do PostgREST não foi disponibilizada pela sessão SQL; não afirmar que essa configuração foi lida. O schema e as tabelas não concedem acesso aos roles de aplicação examinados.
 
-Este guia não aprova política DEC-005/006, retention values, model/provider, checkpointer package/version, schema/grant, runtime/region ou lifecycle worker.
+## Skips e limites
+
+- `tests/integration/conversation/postgres-adapter.test.js`: skip porque `CONVERSATION_TEST_DATABASE_URL` não foi configurada. A conexão direta Node `pg` → Supabase permanece **NOT REQUIRED / NOT VERIFIED** nesta POC.
+- `tests/contracts/domain-read/bigint-projection.test.js`: skip porque `RUN_SPEC004_SUPABASE_CONTRACT` não foi configurada; esse teste remoto pertence a SPEC-004 e não foi habilitado por este lote.
+- Os skips não contam como passes. Nenhuma fixture persistiu após o rollback.
+- A auditoria independente de critérios FR/SC e estado SDD ainda será feita na T006.

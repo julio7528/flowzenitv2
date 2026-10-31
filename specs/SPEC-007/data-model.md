@@ -1,60 +1,31 @@
-# Modelo temporal e de recorrência — SPEC-007
+# Data model: recurring templates
 
-**Estado:** contrato conceitual Draft. Reusa o schema existente; nenhuma migração ou entidade persistida nova é prevista.
+## Existing `public.recorrente` table
 
-## Persistência existente
+Read-only PostgreSQL catalog inspection for the development Supabase project confirmed this existing contract. No application rows were read and no database writes were made.
 
-### `public.recorrente`
+| Column | PostgreSQL type | Nullability / constraint | Agent contract |
+| --- | --- | --- | --- |
+| `id` | `bigint` identity | Primary key, not null | Return as a decimal string to preserve precision. |
+| `demanda` | `text` | Not null; `btrim(demanda)` must be non-empty | Trim and require a non-empty routine name; no uniqueness or max-length constraint was observed. |
+| `hora` | `time without time zone` | Not null | Required local civil start time; preserve the database string. |
+| `data_inicial` | `date` | Not null; must be ≤ `data_final` | Required inclusive civil-date start. |
+| `data_final` | `date` | Not null | Required inclusive civil-date end. |
+| `dias_semana` | `smallint[]` | Not null; cardinality 1–7; each value is in 1–7 | Require a non-empty set of unique ISO weekdays; uniqueness is an application-level check. |
+| `hora_fim` | `time without time zone` | Nullable; null or greater than `hora` | Preserve `null`; when present, require a later local civil time. |
 
-| Campo | Tipo/regra observada | Contrato de uso |
-|---|---|---|
-| `id` | `bigint` identity, primary key | ID persistente; trafegar como string decimal. |
-| `demanda` | `text NOT NULL`, `char_length(btrim(demanda)) > 0` | Nome não vazio após trim; não inventar tamanho máximo ou unicidade. |
-| `hora` | `time without time zone NOT NULL` | Horário civil local de início; não converter a UTC. |
-| `hora_fim` | `time without time zone NULL`; `hora_fim is null or hora_fim > hora` | Valor null é legítimo; manter null. Se informado, deve ser posterior ao início segundo constraint atual. |
-| `dias_semana` | `smallint[] NOT NULL`; cardinalidade 1–7 e elementos contidos em `[1,2,3,4,5,6,7]` | Weekday ISO, 1=segunda e 7=domingo. O check do banco não impede duplicatas; validador de entrada rejeita duplicatas sem alterar schema. |
-| `data_inicial` | `date NOT NULL` | Primeiro dia inclusivo de aplicabilidade. Valor civil `YYYY-MM-DD`. |
-| `data_final` | `date NOT NULL`; `data_inicial <= data_final` | Último dia inclusivo de aplicabilidade. Valor civil `YYYY-MM-DD`. |
+The table has a primary-key index, a GIN index on `dias_semana`, and a B-tree index on `(data_inicial, data_final)`. Catalog inspection found no non-internal trigger and no foreign key to `demandas`. The table stores reusable templates; there is no occurrence, exception, enabled, or pause/resume column.
 
-Não há FK para `public.demandas`, atributo active/enabled, timezone, duração, ocorrência, occurrence ID, skip, edição de instância, feriado ou tabela de exceção. A série não é compromisso independente. A constraint é fonte final para escrita futura, mas não substitui validação nem autorização.
+## Existing access and application behavior
 
-### Agenda existente de demandas
+RLS is enabled and not forced. The current `anon` role has table `SELECT`, `INSERT`, `UPDATE`, and `DELETE` privileges, with matching permissive policies. SPEC-007 uses only the existing Supabase JS/PostgREST client and current permissions; it makes no schema, grant, RLS, policy, or trigger changes.
 
-`public.demandas.data_exec` é `date`; `hora_inicio` e `hora_fim` são `time without time zone`. A SPEC-007 não os altera; SPEC-006 possui seus contratos de escrita. Os valores são civis em `America/Cuiaba` e não são convertidos para UTC. A regra existente de sobreposição permite itens coincidentes; nenhum item deve ser deslocado para “corrigir” overlap.
+`server/domain/read/repository.js` selects the fixed projection `id::text,demanda,hora,hora_fim,dias_semana,data_inicial,data_final`. An explicit date query filters `data_inicial <= date`, `data_final >= date`, and contains the date's ISO weekday. The predicates make both range boundaries inclusive. `server/domain/read/routine-templates.js` validates the returned template and confirms that each row applies to the requested date.
 
-## Tipos conceituais sem persistência
+`src/pages/RecorrentesPage.jsx` currently loads and edits the same table directly. Its weekday picker uses a `Set`, so it avoids duplicates in the UI, but PostgreSQL itself does not enforce uniqueness in the array. The current form requires both times, although the database permits `hora_fim = null`. `src/lib/recurringTime.js` supplies a one-hour display fallback when `hora_fim` is null; SPEC-007 must preserve null on writes and must not persist that visual fallback as a duration.
 
-### `TemporalContext`
+`src/pages/PlanejamentoDiarioPage.jsx` reads templates for a selected date, applies the weekday and inclusive date-range checks, then combines read-only template projections with scheduled subtasks for the timeline. This does not create a persisted occurrence or assign an occurrence ID.
 
-| Campo | Regra |
-|---|---|
-| `referenceInstant` | Instant ISO 8601 com offset ou `Z`, fornecido pelo server/runtime confiável. |
-| `locale` | `pt-BR` para interpretação de frases em português brasileiro. |
-| `timeZone` | Literal aprovado `America/Cuiaba`; não controlado pelo modelo. |
-| `intent` | `query`, `schedule`, `reschedule` ou `series`, quando conhecido do chamador. |
-| `tzdbVersion` | Evidência da versão realmente usada, obtida do runtime quando disponível; não é coluna do domínio. |
+## Civil date and time semantics
 
-### `TemporalResolution`
-
-Estado discriminado `resolved | ambiguous | invalid | unsupported`; inclui frase de entrada na memória efêmera, instante de referência, zone, valores civis resolvidos (`date`, `startTime`, `endTime` ou null), eventual instant ISO normalizado, e motivos de ambiguidade/erro. Resultado nunca vira registro ou histórico durável nesta SPEC.
-
-### `RoutineDisplayProjection`
-
-Projeção efêmera de uma série que se aplica a uma data: `{ templateId, selectedDate, title, weekday, startTime, endTime|null }`. A chave de exibição é par template/data no contexto da resposta. Não atribuir `occurrenceId`, ID de demanda/subtarefa ou persistência.
-
-## Regras puras
-
-- `today(referenceInstant, America/Cuiaba)` retorna a data civil em Cuiabá no instant. `tomorrow` é a data civil seguinte, não um delta de duração 24h.
-- Timestamp explícito com offset → instant → data/hora local em Cuiabá. Data e hora locais explícitas continuam valores civis sem inferir offset.
-- Bare weekday e “próxima semana” são ambíguos para consulta ou gravação até DEC-013 definir os dois contextos. Não escolher a proposta antiga do roadmap.
-- Wall-clock gap/fold segundo TZDB é ambíguo/inválido; sem deslocamento ou escolha arbitrária de offset.
-- Semana de calendário observada começa segunda e termina domingo; weekday é ISO 1–7. A expressão natural “próxima semana” ainda depende DEC-013.
-- Uma rotina aplica-se se o weekday ISO da data pertencer a `dias_semana` e `data_inicial <= selectedDate <= data_final`.
-- End time null permanece null. Intervalos que cruzam a meia-noite não atendem `hora_fim > hora` e não são reinterpretados como terminando no dia seguinte.
-- Intervalo sobreposto é informativo; nenhum registro existente é rejeitado, alterado ou movido por causa do overlap.
-
-## Mutação, concorrência e integridade
-
-Comandos futuros usam operação/versão allowlisted, string ID bigint, `expectedStateFingerprint`, confirmação aprovada e chave idempotente server-side. Edit de template é de série inteira e apresenta campos/range/weekdays anteriores e novos. Revalidar alvo e estado antes da escrita, usar o adapter transacional/idempotente aprovado por SPEC-002/006 e ler de volta. Conflito, confirmação ausente, DEC-001 fechado ou estado incerto não podem responder sucesso. Não usar chamadas REST separadas como promessa de atomicidade.
-
-DEC-004 bloqueia operações de exceção, mas não bloqueia a projeção e edição da série inteira já representada. DEC-009 bloqueia writes sem linha de confirmação aprovada. DEC-013 bloqueia seleção implícita de datas/intervalos para as frases cobertas. Nenhuma destas pendências exige alterar o modelo atual para terminar o planejamento.
+Interpret relative user dates in `America/Cuiaba`. Keep PostgreSQL `date` and `time without time zone` values as civil strings and do not convert them to UTC. The existing schema requires `hora_fim > hora`; overnight ranges are therefore unsupported. The current template does not encode a task, subtask, or occurrence relationship.

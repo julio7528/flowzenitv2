@@ -1,33 +1,29 @@
-# Specification Quality Checklist: Persistent Conversational Memory
+# Checklist de qualidade da SPEC-003@3
 
-**Purpose**: Reviewer checklist for lifecycle, isolation, and persistence requirements.
-**Created**: 2026-10-28
 **Feature**: ../spec.md
+**Scope de decisão**: dec005-spec003-v1 apenas para persistência conversacional SPEC-003; DEC-005 global permanece PENDING.
 
-## Content Quality
+## Conteúdo
 
-- [x] User journeys cover resume, lifecycle management, and separation of stored artifacts.
-- [x] Scope excludes unapproved semantic memory and transcript indexing.
-- [x] Security boundaries apply to every operation, not just thread creation.
-- [x] Mandatory template sections are complete.
+- [x] Jornadas cobrem histórico/retomada, ciclo de vida e separação de artefatos.
+- [x] Exclusões bloqueiam autenticação nova, endpoints privados, sharing e memória semântica cross-thread.
+- [x] Gate DEC-001 precede toda operação privada e seus testes exigem zero chamadas de storage.
+- [x] Política de retenção, checkpoint, summary, exclusão, exportação e sharing definida com escopo específico e prazos.
+- [x] Sem soft-delete de conteúdo, recovery grace, tombstone de conteúdo ou scheduler presumido.
+- [x] Schema privado, migration PostgresSaver pinada e revogações estão especificados sem grants de produto.
+- [x] Tarefas preservam T001–T029 e cobrem os FR/SC; T030–T035 cobrem novos testes e auditoria.
 
-## Requirement Completeness
+## Completude e verificação
 
-- [ ] DEC-005 retention, deletion, export, and sharing policy is resolved before production enablement.
-- [x] Pagination, single-user conversation lifecycle, checkpoint compatibility, deletion, and active-turn edge cases are specified.
-- [x] Conversation fixtures use the single-user application dataset and do not require authenticated/non-owner identities or multi-user, tenant, or organization support.
-- [x] Success criteria are measurable.
-- [x] Dependencies and data categories are explicit.
-- [x] Bounded context construction and compaction preserve the canonical transcript and carry a source cursor.
-- [x] Checkpoint version/integrity/expiry and duplicate/concurrent turn behavior have testable contracts without selecting pending retention or runtime values.
+- [x] FR-001 a FR-016 têm mapeamento para tarefas e comportamento mensurável.
+- [x] SC-001 a SC-007 têm testes de aceitação específicos.
+- [x] Idempotência inclui concorrência, payload divergente e não repetição de efeito concluído.
+- [x] Cursores estão vinculados a conversa, tamanho, versão e snapshot e verificam integridade.
+- [x] Checkpoint inclui graph/state/serializer, turn, namespace, digest, expiry e ledger.
+- [x] Context budget nunca trunca mensagem estruturada ou altera transcript.
+- [x] PostgreSQL real sintético, cleanup exato, zero resíduos e ACL são quality gates.
+- [x] API/export não fica disponível; provider não recebe transcrições reais; DEC-001 permanece fechada.
 
-## Feature Readiness
+## Escopo da checklist
 
-- [x] Tests cover valid/unknown IDs, replay safety, retention, deletion, and fail-closed private-history behavior until the SPEC-001 gate is satisfied.
-- [x] Requirements separate transcript content from checkpoints and audit.
-- [x] The SPEC explicitly blocks production persistence while its lifecycle policy is open.
-
-## Notes
-
-- The open retention policy is documented as a production gate rather than assigned an invented duration.
-- Checked items describe specification completeness and planned coverage; they do not claim implementation or test execution. DEC-005 still blocks production persistence, and DEC-006 blocks sending real transcript content for compaction.
+Checkboxes indicam presença no desenho e nas tarefas. Não afirmam implementação, execução de teste, aplicação de migration ou aprovação SDD. Esses resultados serão preenchidos pela evidência do lote.

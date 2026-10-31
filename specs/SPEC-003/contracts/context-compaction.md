@@ -1,32 +1,24 @@
-# Contrato de contexto e compactação — SPEC-003
+# Contrato de contexto e compactação — SPEC-003@3
 
-**Estado:** estratégia proposta; modelos, limites e divulgação ainda dependem de DEC-005/006/011/012 e SPEC-002.
+**Estado**: construção interna com dados sintéticos; não chama provedor e não habilita endpoint.
 
-## Build do contexto
+## ContextBuild
 
-```text
-ContextBuild = {
-  conversationId,
-  throughMessageSeq,
-  contextItems: complete message | conversation summary | trusted domain reference,
-  inputBudget: approved runtime/provider configuration,
-  omittedThroughMessageSeq?,
-  summaryFormatVersion?,
-  outcome: "complete" | "compacted" | "needs_clarification" | "budget_unavailable"
-}
-```
+Inclui conversationId, throughMessageSeq, inputBudget do runtime SPEC-002, itens de contexto completos, omittedThroughMessageSeq opcional, summaryFormatVersion e outcome complete, compacted, needs_clarification ou budget_unavailable.
 
-- Carregar somente mensagens da conversa selecionada depois do DEC-001 gate.
-- Preservar instruções de sistema e budget/reservas do runtime SPEC-002. Escolher mensagens recentes por limites de tokens/bytes configurados; não cortar uma mensagem estruturada no meio.
-- Primeiro fallback proposto é uma janela recente mais antiga marcada como omitida. Summary por conversa é opção subsequente, somente após divulgação real aprovada. O summary informa precisamente as sequências cobertas e versão; messages canônicas nunca são reescritas/descartadas pela compactação.
-- Priorizar fonte relacional typed atual para status, datas, horas e relações. Summary/checkpoint é contexto auxiliar e não prova fato transacional.
-- Sem budget executável, falhar com `budget_unavailable`/pedir esclarecimento; não truncar silenciosamente, ultrapassar limite ou inventar que o agente lembra conteúdo.
-- Não gravar em LangGraph Store ou vector index cross-thread nesta SPEC.
+## Regras
 
-## Reprocessamento de summary
+- Verificar MemoryAccessGate antes de acessar transcript/summaries. Gate fechado causa zero chamadas a storage.
+- Respeitar o budget e o token/size estimator configurados pelo runtime; nenhum parâmetro de request pode ampliá-lo.
+- Selecionar mensagens completas. Nunca cortar JSON, tool result, mensagem ou estrutura no meio. Reservar orçamento para instruções e saída conforme SPEC-002.
+- Priorizar mensagens recentes. Marcar sequência omitida; usar summary somente se pertencer à mesma conversa, versão de formato suportada e source interval corresponder ao transcript.
+- Summary registra fromMessageSeq, throughMessageSeq, sourceTranscriptVersion e formato. Mensagens novas após throughMessageSeq são adicionadas como delta; summary stale não é anunciado como completo.
+- Canonical transcript fica byte-for-byte inalterado. Checkpoint e summary não são apresentados como mensagens.
+- Summary é contexto geral, não prova de estado transacional. Estado atual de produto depende da operação tipada SPEC-004.
+- Quando nenhum conjunto de mensagens completas cabe, falhar com budget_unavailable/needs_clarification, sem truncamento silencioso ou alegação de memória.
+- ContextSummary é derivado e segue o acesso, prazo e deleção da conversa.
+- DEC-006 continua proibindo envio de transcript real a DeepSeek, Gemini ou LangSmith. Teste usa summarizer determinístico e fixtures sintéticas.
 
-Summary é stale se há nova transcript sequence além de `throughMessageSeq`, serializer/formato mudou, dado de origem foi apagado ou a versão de disclosure/provider mudou. Regenerar do transcript segundo DEC-006 ou usar só janela recente. Resumos antigos seguem deleção/retention do mesmo dataset de conversa.
+## Isolamento
 
-## Privacidade e teste
-
-Não enviar transcript real a Gemini, DeepSeek ou LangSmith sem DEC-006. Em planejamento, doubles trabalham apenas com dados sintéticos. Testes com sentinel verificam que conteúdo não cai em logs, tracing, audit, response erro, provider stub não autorizado ou cliente Vite.
+Não usar LangGraph Store, embeddings, vector index ou recuperação de outra conversa. Budget, cursor, versão e referências internas não são incluídos em resposta de usuário.

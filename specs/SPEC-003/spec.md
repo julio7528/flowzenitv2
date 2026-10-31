@@ -1,146 +1,139 @@
 # Feature Specification: Persistent Conversational Memory
 
-**SPEC ID**: SPEC-003  
-**Version**: 1  
-**Dependencies**: [SPEC-001, SPEC-002]  
+**SPEC ID**: SPEC-003
+**Version**: 4
+**Dependencies**: [SPEC-001, SPEC-002]
 **Risk**: high
-
-**Feature Branch**: not-created (existing branch main preserved)
-
 **Created**: 2026-10-28
+**Status**: Draft — POC verification scope revised; implementation requires an exact approved SDD manifest
+**Input**: Persist a canonical conversation history and LangGraph checkpoints while separating transcript, domain context, derived summaries, semantic memory, and audit metadata.
 
-**Status**: Draft
+**Version history**: Version 2 recorded the owner-approved, SPEC-scoped retention policy, verified LangGraph/PostgreSQL compatibility, private-schema migration design, integrity-bound history cursor, and testable deletion/idempotency limits. Version 3 corrected dependency identifiers and was registered in a paused batch. Version 4 keeps the feature and storage contract, but makes Supabase SQL MCP synthetic database evidence plus Node adapter contract tests sufficient for the POC completion gate; a direct Node-to-PostgreSQL test URL/certificate is optional and is not claimed as passed. Prior registered snapshots remain immutable.
 
-**Input**: User description: Persist conversation history and LangGraph checkpoints while separating conversation, domain context, semantic memory, and audit records.
-
-## Scope and Exclusions
+## Scope and exclusions
 
 ### In scope
-- Define conversation and message lifecycle for the single-user application, history pagination, checkpoint association, deletion, and retention controls.
-- Separate message content, graph checkpoint state, optional user memory, domain records, and audit metadata by purpose and access policy.
-- Resume an interrupted graph turn only when its thread, graph version, and durable tool ledger agree.
-- Build bounded per-turn context from the canonical transcript and compact older context without rewriting history or creating cross-thread semantic memory.
-- Define concurrency, duplicate-turn, checkpoint integrity, and expiration behavior without selecting an unapproved retention duration.
-- Provide redaction and retention behavior that can be verified without exposing stored content.
+- Server-side conversation and message persistence behind an internal repository interface.
+- Stable, bounded history pagination, idempotent append, turn serialization, and replay-safe results.
+- Separate, versioned LangGraph checkpoint persistence and fail-closed resume preflight against the SPEC-002 ExecutionLedger.
+- Conversation lifecycle, scoped retention, deterministic deletion, and an administrative cleanup routine when no scheduler exists.
+- Bounded context construction from complete canonical messages and per-conversation summaries with exact source sequence provenance.
+- Private PostgreSQL schema and additive migration isolated from product tables and the SDD control plane.
+- The existing Supabase PostgreSQL project is the only database target. No Docker, local PostgreSQL service, database branch, or second database is required for the POC.
+- Synthetic database and runtime tests. DEC-001 remains closed; these internal capabilities are not available through an unauthenticated endpoint or to the end user.
 
 ### Explicitly out of scope
-- Persistent semantic user memory or vectorized conversation retrieval unless separately approved.
-- Indexing conversation transcripts into SPEC-008/009 RAG.
-- Selecting retention duration, export policy, cross-device sharing, or deletion grace period; see DEC-005.
-- Chat UI and agent orchestration implementation.
+- Changing authentication, treating the browser passkey or service_role as user identity, exposing private reads or writes, or enabling production access while DEC-001 is closed.
+- Any conversation UI, public history/export endpoint, share link, shared user, organization, tenant, or cross-user conversation access.
+- Cross-conversation semantic memory, LangGraph Store, embeddings, transcript RAG, or transcript indexing.
+- Sending real conversation content to DeepSeek, Gemini, LangSmith, or any external provider; DEC-006 remains globally pending.
+- Domain mutations, new product entities, product table changes, production migrations, deployment, or another SPEC.
+- An assumed cron, worker, or automatic background scheduler.
 
-## Contracts and Constraints
+## Scoped DEC-005 policy
 
-- **Existing contracts**: Use the existing data-integration context from SPEC-001 and graph state contract from SPEC-002.
-- **Compatibility**: No existing product table is repurposed for conversation content. New persistence is additive and isolated.
-- **Security and data handling**: Conversation and thread IDs identify records but do not add a new authentication mechanism or authorize access by themselves. Preserve the existing application path without adding authentication or owner IDs; the client-side passkey is not server-verifiable. Real private history and checkpoint endpoints remain unavailable until the SPEC-001 access-control gate is approved, implemented, and verified. Checkpoints and transcript content are not copied into general audit logs by default.
-- **Dependencies**: [SPEC-001, SPEC-002].
+This SPEC applies the owner-approved, feature-scoped policy identifier **dec005-spec003-v1**. It resolves lifecycle choices only for conversation history, checkpoints, and their summaries in SPEC-003. The global DEC-005 remains PENDING for other kinds of memory, audit, and storage.
 
-## User Scenarios & Testing
+- Canonical conversation history expires 365 days after its last valid activity. Each accepted turn renews the deadline. Access checks enforce expiry before returning any content.
+- Checkpoints expire no later than 30 days after their last valid update and never after the linked conversation expires. An expired checkpoint cannot resume a graph or invoke tools; valid history can remain until the conversation's own expiry.
+- Summaries are derived artifacts of the same conversation and share its access, expiry, and deletion lifecycle. They do not replace canonical messages or state current transactional facts.
+- Deletion moves the conversation atomically to deleting before cancellation/reconciliation. Reads and appends are denied in that state. All message, checkpoint, checkpoint-write/blob, summary, and known derived/cache artifacts are removed. A partial failure remains deleting and inaccessible until an idempotent retry proves removal. No recovery window, content soft-delete, or content tombstone is retained.
+- A structured JSON export DTO is defined for canonical messages and minimal metadata, excluding credentials, hidden reasoning, raw checkpoints, and private tool payloads. It has no endpoint while DEC-001 is closed.
+- Sharing is disabled: no public link, user-to-user sharing, tenant, or organization.
+- Operational audit contains only allowlisted metadata without transcript, prompt, checkpoint, or tool content. SPEC-003-owned deletion-operation metadata may remain for 30 days after deletion when no other contract requires it. The SDD append-only ledger is not modified.
+- No scheduler is assumed. Enforce expiry on every access and provide a narrowly scoped administrative maintenance operation to purge expired artifacts. Its lack of scheduled invocation is an operational limitation until separately provisioned.
 
-### User Story 1 - Resume a conversation (Priority: P1)
+## Contracts and security constraints
 
-The single application user opens a prior conversation and continues from the correct bounded state.
+- Conversation and thread IDs locate records but never authorize access. DEC-001 is checked before repository, checkpoint, ledger, or private tool access; a closed gate returns ACCESS_DISABLED with zero private calls.
+- Do not add authentication, owner IDs, multi-user identity, API grants, or service-role authorization.
+- History pages use a page size default of 50, maximum of 100, deterministic messageSeq ordering, and an opaque cursor bound to conversation, page size, cursor version, and the initial snapshot maximum. A server-only key authenticates cursor integrity; it is injected and never hard-coded.
+- Message sequence allocation and turn reservation are serialized per conversation. The same request key and payload replays one result; a different payload with that key returns a safe conflict.
+- Checkpoint envelopes include graph, state-schema, and serializer versions; conversation/thread, checkpoint namespace/ID, producing turn, correlation ID, integrity data, and ledger references. Every resume preflight fails closed on absent, expired, corrupt, incompatible, or ledger-uncertain state.
+- Context limits come from the installed SPEC-002 runtime. Select whole messages only. Never silently cut structured content or mutate canonical history.
+- All test and migration fixtures are synthetic. Logs, audit details, browser bundles, errors, and provider stubs receive no private transcript, prompt, credential, raw checkpoint, or tool payload.
+- The private conversation schema is not added to Supabase exposed schemas. No content access is granted to PUBLIC, anon, authenticated, or service_role. Product grants/RLS and existing data remain untouched.
 
-**Why this priority**: A persistent chat must preserve continuity without replaying completed operations or exposing internal checkpoint state as conversation history.
+## User scenarios and acceptance
 
-**Independent Test**: Create multiple synthetic conversations for the single application dataset; attempt normal retrieval, malformed/unknown IDs, and graph resume.
+### Story 1 — Retrieve history and resume safely (P1)
+A future authorized application path can retrieve a prior conversation and continue only from a compatible, ledger-consistent checkpoint. This SPEC implements internal contracts and synthetic tests; it does not open that path.
 
-**Acceptance Scenarios**:
-1. **Given** an existing conversation in the single-user dataset, **When** its history is requested, **Then** messages are returned in stable chronological order with pagination.
-2. **Given** an unknown or malformed conversation ID, **When** it is retrieved or resumed, **Then** the service returns a stable no-record or validation outcome without an internal error.
-3. **Given** a resumable checkpoint with a completed tool outcome, **When** the graph continues, **Then** the completed operation is not repeated.
+Acceptance:
+1. A valid synthetic history page is in deterministic order, and subsequent pages do not duplicate messages or include messages after the captured snapshot maximum.
+2. Malformed, unknown, cross-conversation, or tampered IDs/cursors return stable validation/no-record outcomes without content or internal errors.
+3. A checkpoint with completed ledger outcomes never repeats their operation. Missing or uncertain outcomes prevent resumption before any tool call.
+4. Empty history returns an explicit empty result distinct from absent/corrupt checkpoint state.
 
-### User Story 2 - Manage stored conversation data (Priority: P1)
+### Story 2 — Apply retention and deletion (P1)
+The internal store applies only dec005-spec003-v1 and safely reconciles deletion.
 
-The application user can apply the approved retention and deletion policy to conversation artifacts.
+Acceptance:
+1. New valid activity renews the 365-day history deadline; checkpoint writes refresh a maximum 30-day deadline bounded by conversation expiry.
+2. Expiration blocks retrieval before returning data and removes expired artifacts on access or an explicit maintenance run.
+3. Deletion blocks reads and writes immediately, reconciles an active turn through cancellation and the durable ledger, and removes all content artifacts. An injected partial failure remains deleting and inaccessible until retry completes.
+4. Completed deletion has zero retrievable transcript, checkpoint, checkpoint-write/blob, summary, or known derived content. Only minimum content-free operation metadata can remain for 30 days.
+5. Export has a typed JSON contract but no endpoint; sharing remains disabled.
 
-**Why this priority**: Conversation records can contain sensitive operational context.
+### Story 3 — Keep transcript, graph state, and summaries separate (P2)
+The internal runtime can assemble bounded context while preserving the canonical transcript and data categories.
 
-**Independent Test**: Exercise retention and deletion against synthetic records and inspect transcript, checkpoint, derived index, and audit references.
+Acceptance:
+1. Checkpoints and summaries are never returned as messages.
+2. A summary records its source message sequence interval and format version, remains in its own conversation, and never changes the transcript.
+3. Current domain facts remain sourced from typed SPEC-004 operations; summaries and checkpoints are not transactionally authoritative.
+4. No semantic cross-thread store, transcript embedding, or provider/trace disclosure is created.
 
-**Acceptance Scenarios**:
-1. **Given** DEC-005 retention and deletion settings are configured, **When** an eligible record reaches its policy boundary, **Then** transcript and checkpoint artifacts follow the same declared lifecycle or an explicitly documented exception.
-2. **Given** deletion is requested, **When** the operation completes, **Then** content is no longer retrievable and the audit record retains only the minimum approved non-content evidence.
-3. **Given** retention policy is not approved, **When** storage is configured, **Then** production conversation persistence is not enabled with an invented duration.
+## Functional requirements
 
-### User Story 3 - Keep memory categories separate (Priority: P2)
+- **FR-001**: Every conversation, message, checkpoint, and summary MUST belong to the single application dataset and an opaque conversation/thread ID; no owner UUID or second user identity is introduced.
+- **FR-002**: Every operation MUST validate conversation/thread IDs, but IDs MUST NOT authorize access. With DEC-001 closed, the gate MUST reject before any repository, checkpointer, ledger, or private handler call.
+- **FR-003**: Canonical messages MUST distinguish user, assistant, and allowlisted tool-summary origins; support deterministic pagination with default 50 and maximum 100; and order by monotonic messageSeq.
+- **FR-004**: Checkpoints MUST remain separate from transcript and carry graph, state-schema, serializer, thread, checkpoint namespace/ID, producing-turn, correlation, and integrity metadata.
+- **FR-005**: Resume MUST reject absent, expired, corrupt, incompatible, or ledger-incomplete state before any pending tool can execute.
+- **FR-006**: Transcript, graph checkpoint, summary, domain context, and operational audit MUST have separate data classifications and access paths. A JSON export contract MUST include only canonical messages and necessary metadata; it MUST exclude secrets, hidden reasoning, raw checkpoint state, and private tool payloads. No export endpoint is enabled.
+- **FR-007**: Transcript, prompts, checkpoints, and tool payloads MUST NOT enter generic logs, traces, or audit events. Operational records MUST contain only an allowlist of non-content metadata.
+- **FR-008**: The conversation store MUST apply policy dec005-spec003-v1: history expires after 365 days since valid activity; checkpoint state expires within 30 days since valid update and no later than its conversation; summary shares conversation expiry. Global DEC-005 remains pending for other storage. Expiration is checked on access, with an administrative purge routine; no scheduler is assumed.
+- **FR-009**: Deletion MUST block access and writes immediately, reconcile active turns, and remove transcript, checkpoints, pending writes/blobs, summaries, known derivatives, and caches. It MUST be idempotent and remain deleting after partial failure. No content soft-delete, grace window, or content tombstone is allowed.
+- **FR-010**: New conversation history MUST return explicit empty; cursors MUST be opaque, versioned, integrity-checked, conversation/page-size bound, snapshot-bound, and reject tampering or cross-conversation reuse.
+- **FR-011**: Tests MUST cover valid, unknown, malformed, expired, and cross-conversation IDs/cursors; replay, concurrency, retention, deletion, redaction, and zero private storage calls with DEC-001 closed. Tests MUST NOT add multi-user, tenant, organization, or non-owner support.
+- **FR-012**: The contract MUST define active-turn cancellation/reconciliation, provider interruption, partial deletion, stale checkpoints, and uncertain ledger outcomes without silent replay.
+- **FR-013**: Context construction MUST use effective SPEC-002 input budgets, include only complete messages, record its selected sequence/cursor and summary version, and never rewrite canonical transcript.
+- **FR-014**: A compacted summary MUST be conversation-scoped derived content, with exact source sequence interval and format version; it MUST NOT become cross-thread memory or an authoritative current domain fact. Real transcript summarization by an external provider remains prohibited under pending DEC-006.
+- **FR-015**: Checkpoint resume MUST validate thread, checkpoint namespace/ID, graph/state/serializer versions, producing turn, integrity, expiry, and durable ledger outcome. Checkpoint expiry is 30 days maximum from last valid update and bounded by conversation expiry; an expired checkpoint MUST NOT block otherwise-retained transcript history.
+- **FR-016**: Turn creation and message append MUST be idempotent and serialized per conversation. Same-key/same-payload replay yields one visible turn; same-key/divergent-payload conflicts safely. Deletion MUST prevent new turns/retrieval and reconcile active work before deletion completes.
+- **FR-017**: Conversation persistence and checkpoints MUST use the existing Supabase PostgreSQL project as the only database. Local PostgreSQL, Docker, database branches, and secondary databases are not prerequisites for this POC.
 
-The application user can distinguish the graph checkpoint needed to resume a thread from the conversation history and any semantic memory.
+## Key entities
 
-**Why this priority**: These artifacts have different access, purpose, and retention needs.
+- **Conversation**: Single-dataset metadata, lifecycle, last valid activity, policy version, and next message sequence.
+- **Message**: Canonical ordered user/assistant/allowlisted tool summary.
+- **Turn reservation**: Server-generated request key, payload hash, state, and durable replay reference; side-effect outcomes remain in the SPEC-002 ExecutionLedger.
+- **Graph checkpoint**: Internal versioned execution state, never user-visible history.
+- **Context summary**: Derived per-conversation content tied to an exact message sequence interval.
+- **Deletion operation metadata**: Content-free operational state with at most 30-day post-deletion retention.
 
-**Independent Test**: Verify separate data classifications and that deleting one category cannot silently leave an accessible derived copy.
+## Success criteria
 
-**Acceptance Scenarios**:
-1. **Given** a checkpoint is written, **When** history is read, **Then** internal graph state is not returned as user-visible transcript content.
-2. **Given** semantic memory is not enabled, **When** a conversation is persisted, **Then** no transcript embedding or cross-thread memory is created.
+- **SC-001**: 100% of unknown, malformed, expired, or invalid conversation retrieval/resume fixtures return the documented stable outcome without an internal error or content leak.
+- **SC-002**: Every valid history page is deterministic and has no duplicates across adjacent cursors; messages added after the first page snapshot do not appear in that pagination session.
+- **SC-003**: 100% of corrupt or version-incompatible checkpoint fixtures stop before any pending tool is invoked.
+- **SC-004**: A completed deletion leaves zero retrievable transcript, checkpoint, checkpoint-write/blob, summary, and known derived-memory artifacts in the approved deletion scope.
+- **SC-005**: 100% of context fixtures remain within the injected SPEC-002 budget; compaction records the exact source cursor/version and leaves canonical transcript bytes unchanged.
+- **SC-006**: Same-key replay and concurrent duplicate turns create at most one visible user/assistant turn and never repeat a completed ledger operation.
+- **SC-007**: 100% of expired, corrupt, incompatible, or ledger-incomplete checkpoint fixtures stop before a pending tool call; history remains independently retrievable until its own expiry.
 
-### Edge Cases
-- History page boundary changes while new messages arrive; stable ordering uses a monotonic message sequence or cursor.
-- A checkpoint is missing, corrupted, or created by an incompatible graph version; do not resume its tools.
-- A deletion request races with an active turn; further writes are blocked or reconciled according to a recorded terminal state.
-- A tool response contains content that should not be copied into a transcript or checkpoint.
+## Dependencies and validation
 
-## Requirements
+Hard dependencies: SPEC-001@2 and SPEC-002@2; both must be COMPLETED in SDD before admission. SPEC-004@2 supplies typed domain contracts; its tools remain inaccessible while DEC-001 is closed.
 
-### Functional Requirements
+Required POC checks: Node unit/contract tests for the adapter and LangGraph checkpoint behavior; synthetic schema, constraint, transaction, ACL, and cleanup checks against the existing development project through Supabase SQL MCP; privacy and server-only bundle checks; `npm test`, lint, build, and an independent read-only audit. The SQL MCP evidence does not claim to exercise the Node `pg` adapter. A direct Node-to-PostgreSQL test is optional and NOT VERIFIED unless it is actually run; its URL, pooler setup, and CA certificate are not required completion gates. No Docker or local PostgreSQL service is required. No provider smoke test with real content is allowed.
 
-- **FR-001**: Every conversation, message, and checkpoint MUST be associated with the single-user application dataset and an opaque conversation/thread ID; DEC-001 does not introduce an authenticated principal or owner UUID.
-- **FR-002**: Every operation MUST validate the conversation/thread ID, but that ID MUST NOT be treated as authorization. Preserve the existing application path without adding a new authentication mechanism; private history and checkpoint endpoints MUST fail closed until the SPEC-001 access-control gate is satisfied.
-- **FR-003**: Message history MUST support bounded pagination and stable ordering and MUST distinguish user, assistant, and tool-originated content.
-- **FR-004**: Graph checkpoints MUST be logically separate from transcript messages and MUST include graph version, state version, and correlation to the turn that produced them.
-- **FR-005**: Checkpoint resume MUST reject absent, corrupted, incompatible, or incomplete tool-ledger state without executing pending mutations.
-- **FR-006**: Conversation content, checkpoints, optional semantic memory, domain context, and audit metadata MUST have separately declared data classifications and access paths.
-- **FR-007**: Transcript content MUST NOT be copied into generic logs, traces, or audit events unless a separately approved policy defines fields, redaction, access, and retention.
-- **FR-008**: Production persistence MUST remain disabled until retention, deletion, export, and sharing decisions in DEC-005 are resolved.
-- **FR-009**: When enabled under an approved policy, deletion MUST cover transcript, checkpoints, compaction summaries, derived memory/index entries, and caches, with a minimal tombstone only where legally and operationally approved.
-- **FR-010**: History retrieval MUST return an explicit empty result for a new thread and a stable cursor for additional pages.
-- **FR-011**: Tests MUST cover valid, unknown, and malformed conversation IDs, replay handling, retention, deletion, and fail-closed behavior while the access-control gate is unmet, without synthetic non-owner identities or product support for multiple users, tenants, or organizations.
-- **FR-012**: The contract MUST define behavior for an active turn, deletion request, provider interruption, and stale checkpoint without silent replay.
-- **FR-013**: Context construction MUST respect the active SPEC-002/provider input budget; any compaction MUST preserve the canonical transcript and record its source message cursor and compaction format version. Numeric limits remain subject to DEC-011/DEC-012 and the approved runtime.
-- **FR-014**: A compacted summary MUST remain scoped to its conversation, be classified as derived conversation content, and never become persistent cross-thread semantic memory or an authoritative source for exact transactional facts. Sending real transcript content for summarization remains blocked by DEC-006.
-- **FR-015**: A checkpoint MUST be validated against its thread, checkpoint/state format version, graph version, producing turn, and durable tool-ledger state before resume. Expiration MUST derive from an approved DEC-005 policy; no default TTL is selected, and expired, corrupt, or incompatible state MUST stop before a tool executes.
-- **FR-016**: Message append and turn creation MUST be idempotent under duplicate requests and deterministic under concurrent turns. A deletion request MUST prevent new turns and retrieval while an active turn is cancelled or reconciled through a durable terminal/ledger outcome; exact retention/tombstone behavior remains governed by DEC-005.
+## Completion evidence
 
-### Key Entities
-
-- **Conversation**: Single-user thread metadata, state, lifecycle, and policy references.
-- **Message**: Ordered user, assistant, or tool interaction with content classification and provenance.
-- **Graph checkpoint**: Internal resumable orchestration state, not user-visible history.
-- **Memory artifact**: Optional derived preference or fact; not enabled until a separate policy is approved.
-
-## Success Criteria
-
-### Measurable Outcomes
-
-- **SC-001**: 100% of unknown or malformed conversation retrieval and resume fixtures return the documented no-record or validation result without internal errors.
-- **SC-002**: Every valid history page returns messages in deterministic order with no duplicates across adjacent cursors.
-- **SC-003**: 100% of checkpoint corruption or version-mismatch tests stop before invoking any pending mutation tool.
-- **SC-004**: A deletion test leaves zero retrievable transcript, checkpoint, compaction-summary, and derived-memory artifacts within the approved deletion scope.
-- **SC-005**: 100% of context-build fixtures stay within the injected input budget; when compaction is required, the recorded source cursor/version is correct and the canonical transcript remains byte-for-byte unchanged.
-- **SC-006**: Replaying the same turn request or submitting concurrent duplicate turns creates at most one visible message/turn and invokes no completed tool operation a second time.
-- **SC-007**: 100% of expired, corrupt, incompatible, or ledger-incomplete checkpoint fixtures stop before a pending mutation tool is invoked.
-
-## Validation and Evidence
-
-| Quality gate | Required | Command or method | Expected evidence |
-| --- | --- | --- | --- |
-| Lint/static checks | Yes | Project lint command | No new violations |
-| Build/type check | Yes | Project production build | Persistence adapters remain server-only |
-| Unit/integration tests | Yes | Synthetic history and checkpoint tests | Pagination, resume, corruption, deletion |
-| Database/contract tests | Yes | Isolated single-user/current-grant tests | Synthetic fixtures only; private history endpoints fail closed until the access-control gate is met; no new RLS or owner checks are assumed by this SPEC |
-| E2E/accessibility/security evaluation | Yes | API lifecycle tests and deletion verification | No leakage across history, checkpoint, or audit |
-
-## Completion Evidence
-
-- [ ] Access and lifecycle scenarios have PASS, FAIL, or NOT VERIFIED evidence.
-- [ ] Retention decision is resolved before production persistence is enabled.
-- [ ] Required tests cover transcript, checkpoint, and derived artifact deletion.
-- [ ] Changes remain limited to approved memory and checkpoint behavior.
-
-## Assumptions
-
-- Conversation content is sensitive by default.
-- Short-term graph checkpoint state and long-term user memory are distinct concepts.
-- No conversation-level cross-thread semantic memory is created by default.
+- All executable tasks and every FR-001…FR-016 / SC-001…SC-007 have evidence.
+- Migration and PostgreSQL checks affect only the approved private schema on the verified development project, use synthetic fixtures, and leave zero fixture residue.
+- DEC-001 remains closed; all private runtime and endpoint calls fail before storage access.
+- The registered v4 snapshot and its approved manifest remain unchanged during execution; no unresolved required failure remains.
+- SDD records the SPEC and sole-SPEC batch COMPLETED.
+- No commit, push, merge, deploy, or production operation occurred.

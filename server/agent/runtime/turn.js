@@ -75,7 +75,7 @@ function uncompletedActions(state) {
     .map((name) => `The ${name} read was not completed.`);
 }
 
-function safeAnswer({ state, toolResults, assistantTexts }) {
+function safeAnswer({ state, toolResults, assistantTexts, writeOutcome }) {
   try {
     return {
       answer: composeAgentResponse({
@@ -83,6 +83,7 @@ function safeAnswer({ state, toolResults, assistantTexts }) {
       toolResults,
       missingEvidence: [],
       uncompletedActions: uncompletedActions(state),
+        writeOutcome: writeOutcome ?? null,
       }),
       failed: false,
     };
@@ -166,7 +167,7 @@ export function createAgentTurnRunner({
     }
 
     let finalState = initialState;
-    let collected = { toolResults: [], safeToolReferences: [], assistantTexts: [] };
+    let collected = { toolResults: [], safeToolReferences: [], assistantTexts: [], writeOutcome: null };
     try {
       finalState = await graph.invokeWithAgentResults(
         initialState,
@@ -187,6 +188,7 @@ export function createAgentTurnRunner({
       state: finalState,
       toolResults: collected.toolResults,
       assistantTexts: collected.assistantTexts,
+      writeOutcome: collected.writeOutcome,
     });
     let answer = composition.answer;
     if (composition.failed) terminalOutcome = 'failed';

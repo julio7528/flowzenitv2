@@ -10,11 +10,13 @@ Keep existing React, Vite, JavaScript, Supabase, PostgreSQL, and Vercel integrat
 
 ### II. User-controlled scope
 
-The user owns SPEC priority, order, batch membership, exact version, architectural decisions, production operations, and resumption after a pause. Execute only the immutable SPEC versions in the approved batch manifest. A later SPEC starts only after the current SPEC passes its required gates.
+The user owns SPEC priority, order, batch membership, exact version, architectural decisions, production operations, and resumption after a pause. Execute only immutable SPEC versions in explicitly approved manifests. Preserve order within each batch. Across separate batches, a SPEC whose declared prerequisites are complete may proceed while an unrelated batch is paused, provided the SPEC is not active elsewhere and writable scopes are disjoint. A paused batch remains paused until the user authorizes its resume through the privileged channel.
 
 ### III. Security and data protection
 
 Use least privilege, private schemas, explicit grants, validated inputs, and secret-free evidence. Never expose service keys, database credentials, private prompts, or conversation transcripts in browser code, tests, SPEC snapshots, audit events, checkpoints, or logs. Never weaken existing RLS or permission boundaries to make an implementation convenient.
+
+Quality-gate waivers remain distinct from passes. Only an explicit owner authorization through the privileged Supabase channel may record `WAIVED`, and only when the immutable SPEC snapshot permits the exact gate and outcome basis.
 
 ### IV. Tests accompany the design
 
@@ -38,7 +40,7 @@ Codex does not commit, push, merge, deploy, reset, or discard changes. The user 
 
 ## SDD workflow and quality gates
 
-The normal path is `DRAFT → READY_FOR_REVIEW → APPROVED → QUEUED → PLANNING → IMPLEMENTING → TESTING → VALIDATING → COMPLETED`. Failed checks enter `FIXING`; threshold exhaustion marks a SPEC `BLOCKED` and its batch `PAUSED`. Resuming a paused batch requires explicit user authorization in the privileged Supabase SQL channel. A session ending does not imply background execution.
+The normal path is `DRAFT → READY_FOR_REVIEW → APPROVED → QUEUED → PLANNING → IMPLEMENTING → TESTING → VALIDATING → COMPLETED`. Failed checks enter `FIXING`; threshold exhaustion marks a SPEC `BLOCKED` and its batch `PAUSED`. A pause blocks that batch, not unrelated dependency-ready batches with separate approvals. Resuming the paused batch still requires explicit user authorization in the privileged Supabase SQL channel. A session ending does not imply background execution.
 
 Every SPEC identifies dependencies, scope, exclusions, contracts, risks, ordered tasks, file ownership, test strategy, objective acceptance criteria, and completion evidence. Quality gates are selected proportionally to the change, but lint, build, and applicable tests run for every implementation SPEC. Security-sensitive, persistence, and scheduling changes add integration/authorization checks. The conformance auditor is read-only and records PASS, FAIL, or NOT VERIFIED for each criterion.
 

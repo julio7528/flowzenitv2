@@ -36,15 +36,43 @@ export const SPEC004_READ_TOOL_NAMES = Object.freeze([
   'getRoutineTemplates',
 ]);
 
+export const SPEC006_WRITE_TOOL_NAMES = Object.freeze([
+  'create_task',
+  'create_subtask',
+]);
+
+export const SPEC007_RECURRENCE_TOOL_NAMES = Object.freeze([
+  'create_routine_series',
+]);
+
+export const AGENT_TOOL_NAMES = Object.freeze([
+  ...SPEC004_READ_TOOL_NAMES,
+  ...SPEC006_WRITE_TOOL_NAMES,
+  ...SPEC007_RECURRENCE_TOOL_NAMES,
+]);
+
 export const TerminalOutcomeSchema = z.enum(TERMINAL_OUTCOMES);
 export const ProviderErrorCategorySchema = z.enum(SAFE_PROVIDER_ERROR_CATEGORIES);
 export const Spec004ReadToolNameSchema = z.enum(SPEC004_READ_TOOL_NAMES);
+export const AgentToolNameSchema = z.enum(AGENT_TOOL_NAMES);
+
+export const MAX_ACTIVE_CHAT_MESSAGES = 8;
+
+export const ActiveChatMessageSchema = z.strictObject({
+  role: z.enum(['user', 'assistant']),
+  content: z.string().min(1).refine((value) => value.trim().length > 0, {
+    message: 'Active-chat message content must not be empty.',
+  }),
+});
 
 export const AgentTurnRequestSchema = z.strictObject({
   message: z.string().refine((value) => value.trim().length > 0, {
     message: 'A non-empty message is required.',
   }),
   conversationId: z.string().nullable().optional(),
+  activeChatMessages: z.array(ActiveChatMessageSchema)
+    .max(MAX_ACTIVE_CHAT_MESSAGES)
+    .optional(),
 });
 
 export const TrustedTurnContextSchema = z.strictObject({
@@ -94,7 +122,7 @@ export const ModelAdapterResultSchema = z.strictObject({
 
 export const ToolProposalSchema = z.strictObject({
   providerCallId: z.string().min(1),
-  toolName: Spec004ReadToolNameSchema,
+  toolName: AgentToolNameSchema,
   toolVersion: z.string().min(1),
   // Deliberately unknown: the proposal has no authority until local validation.
   arguments: z.unknown(),

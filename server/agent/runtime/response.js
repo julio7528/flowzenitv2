@@ -1,3 +1,5 @@
+import { z } from 'zod';
+import { MutationOutcomeSchema } from '../../domain/write/outcomes.js';
 import { RUNTIME_LIMITS } from './limits.js';
 import { assertServerOnlyRuntime } from './server-only.js';
 
@@ -9,6 +11,15 @@ const MAX_ACTION_ITEMS = 64;
 const RESPONSE_ERROR_MESSAGES = Object.freeze({
   INVALID_RESPONSE: 'Response could not be safely composed.',
   RESPONSE_TOO_LARGE: 'Response exceeds the allowed size.',
+});
+const POC_WRITE_OPERATION_LABELS = Object.freeze({
+  create_task: 'tarefa',
+  create_subtask: 'subtarefa',
+  create_routine_series: 'rotina',
+});
+const POC_WRITE_OUTCOME_SCHEMA = MutationOutcomeSchema.extend({
+  operation: z.enum(Object.keys(POC_WRITE_OPERATION_LABELS)),
+  reasonCategory: MutationOutcomeSchema.shape.reasonCategory.optional(),
 });
 
 export class AgentResponseError extends Error {
@@ -46,7 +57,7 @@ function readInput(input) {
   try {
     if (Object.getOwnPropertySymbols(input).length > 0) invalidResponse();
 
-    const allowed = new Set(['text', 'toolResults', 'missingEvidence', 'uncompletedActions']);
+    const allowed = new Set(['text', 'toolResults', 'missingEvidence', 'uncompletedActions', 'writeOutcome']);
     const descriptors = Object.getOwnPropertyDescriptors(input);
     for (const key of Object.getOwnPropertyNames(input)) {
       const descriptor = descriptors[key];
@@ -70,6 +81,7 @@ function readInput(input) {
       toolResults: read('toolResults', []),
       missingEvidence: read('missingEvidence', []),
       uncompletedActions: read('uncompletedActions', []),
+      writeOutcome: read('writeOutcome', null),
     };
   } catch (error) {
     if (error instanceof AgentResponseError) throw error;
@@ -172,7 +184,28 @@ export function composeAgentResponse(input = {}) {
   if (typeof values.text !== 'string') invalidResponse();
 
   const context = { active: new WeakSet(), nodeCount: 0 };
-  const text = cloneJsonValue(values.text, context);
+  let writeOutcome = null;
+  if (values.writeOutcome !== null) {
+    const safeCandidate = cloneJsonValue(values.writeOutcome, context);
+    const parsed = POC_WRITE_OUTCOME_SCHEMA.safeParse(safeCandidate);
+    if (!parsed.success) invalidResponse();
+    writeOutcome = parsed.data;
+  }
+  const confirmedWrite = writeOutcome?.outcome === 'COMMITTED'
+    && typeof writeOutcome.persistentId === 'string';
+  const responseText = writeOutcome === null
+    ? values.text
+    : confirmedWrite
+      ? `Cadastro confirmado: ${POC_WRITE_OPERATION_LABELS[writeOutcome.operation]} (ID ${writeOutcome.persistentId}).`
+      : ['DEPENDENCY_UNAVAILABLE', 'FAILED', 'CONFLICT', 'IDEMPOTENCY_CONFLICT']
+        .includes(writeOutcome.outcome)
+        ? 'Não consegui confirmar se o cadastro foi gravado. Verifique o registro antes de tentar novamente.'
+        : writeOutcome.outcome === 'VALIDATION_ERROR'
+          ? 'Não consegui concluir o cadastro com esses dados. Preciso de mais informações.'
+          : writeOutcome.outcome === 'NO_OP'
+            ? 'Nenhum cadastro novo foi confirmado.'
+            : 'O cadastro não foi confirmado.';
+  const text = cloneJsonValue(responseText, context);
   const evidence = cloneJsonArray(values.toolResults, {
     maxItems: RUNTIME_LIMITS.maxToolCalls,
     context,
@@ -191,7 +224,7 @@ export function composeAgentResponse(input = {}) {
     evidence,
     // Model-generated prose is inference. Evidence remains separately tied to
     // structured tool results and their persistent source references.
-    inference: text.length > 0 ? [text] : [],
+    inference: writeOutcome === null && text.length > 0 ? [text] : [],
     missingEvidence,
     uncompletedActions,
   };

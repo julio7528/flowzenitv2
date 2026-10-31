@@ -1,22 +1,33 @@
-# Contrato de ciclo de vida e exclusão — SPEC-003
+# Contrato de ciclo de vida, retenção e exclusão — SPEC-003@3
 
-**Estado:** lifecycle para revisão; DEC-005 continua `PENDING`. Este documento não seleciona prazo, retention, exportação, sharing, tombstone ou grace period.
+**Política limitada**: dec005-spec003-v1. Aplica-se apenas à conversa, checkpoints e summaries da SPEC-003; DEC-005 global permanece pendente para outros armazenamentos.
 
-## Lifecycle proposto
+## Prazos
 
-`active -> deleting -> deleted` é uma proposta de estado interno. Conversa marcada `deleting` bloqueia turn novo e history retrieval imediatamente. Um turno ativo recebe cancelamento; sua escrita/outcome é reconciliada pelo ExecutionLedger. Depois do terminal state, remover artifacts da política aprovada: transcript, checkpoints, pending writes, context summaries, derivados/cache/indexes que existirem. Se persistir tombstone, ele é mínimo e explicitamente permitido pela DEC-005. `deleted` não tem conteúdo acessível.
+- Histórico e mensagens: expiração em last_activity_at + 365 dias; atividade válida renova o prazo.
+- Checkpoint/envelope/writes/blobs: expiração no máximo 30 dias desde última atualização válida e nunca além da expiração da conversa.
+- Summary e derivados: expiram e são excluídos com a conversa.
+- Metadados próprios de operação de exclusão, sem conteúdo, podem permanecer até 30 dias após a conclusão se nenhum outro contrato exigir retenção diferente.
 
-## Retenção e expiração
+Verificar o prazo antes de qualquer read/resume e não retornar conteúdo expirado. Remoção de checkpoint expirado não remove o transcript que ainda está dentro do prazo.
 
-`expiresAt`/TTL só pode ser calculado após a versão aprovada da DEC-005. Worker/cron e região dependem de DEC-010. Antes da política, não iniciar produção nem inventar “ilimitado”, data padrão ou cron de limpeza. Testes usam uma política fixture sintética, identificada como fixture.
+## Transições
 
-## Falhas
+active -> deleting -> deleted. A primeira etapa é transacional. deleting bloqueia toda leitura, novo turno e append. Nenhum conteúdo fica recuperável em deleted. Não há content soft-delete, grace period ou tombstone com conteúdo.
 
-- Erro ao bloquear a conversa: não afirmar exclusão concluída; deixar retrieval/append fail-closed até reconciliar estado.
-- Interrupção em `deleting`: retry idempotente por request/deletion ID; consultar ledger/status para não duplicar side effects.
-- Partial delete: manter `deleting`, proibir retorno de artifacts e continuar cleanup delimitado; não marcar `deleted` enquanto uma categoria recuperável permanecer.
-- Retenção conflitante com audit: evento de auditoria só preserva campos mínimos aprovados; SPEC-003 não manda apagar/retêr audit contra DEC-005/SPEC-010.
+## Deleção e falha
 
-## Isolamento de categorias
+1. Validar solicitação via caminho interno autorizado; nenhum endpoint é exposto com DEC-001 fechado.
+2. Marcar lifecycle deleting e rejeitar reads/writes simultâneos.
+3. Cancelar turno ativo ou consultar o ExecutionLedger durável para seu estado terminal; estado incerto não permite novo efeito.
+4. Remover messages, context_summaries, checkpoint_envelopes, checkpoints, blobs, pending writes e cache/derivados conhecidos em transações delimitadas.
+5. Verificar zero artefatos acessíveis e só então remover a linha de conversa e marcar a operação concluída.
+6. Em falha parcial, conservar deleting, negar acesso e repetir a limpeza idempotentemente. Nunca declarar concluída enquanto qualquer categoria recuperável persistir.
 
-Excluir transcript também apaga context summaries associados. Remoção do checkpoint não altera transcript que o usuário ainda pode ver segundo policy. Long-term semantic memory não existe nesta SPEC. Dados de domínio são preservados porque pertencem à aplicação, não à conversa; uma conversa não cria nem apaga demanda/tarefa.
+## Expiração e operação sem scheduler
+
+Expiry-on-access bloqueia conteúdo expirado e aciona purga delimitada. A rotina administrativa varre somente conversation_private e apenas registros vencidos sob policy_version esperada. Ela exige project ref esperado, confere SUPABASE_URL com o host/usuário do connection string e aborta antes de SQL se o projeto não corresponder. Produz contagens/IDs sintéticos de evidência, sem conteúdo. A rotina é manual até existir scheduler autorizado e validado; não alegar execução periódica automática.
+
+## Preservação e categorias
+
+Conversation deletion não toca demandas, recorrências, schema sdd, auditoria append-only SDD ou outras entidades do produto. Não há store semântico, embedding ou compartilhamento nesta SPEC. Logs registram apenas metadados mínimos allowlisted e nunca transcript, prompt, checkpoint ou payload de tool.

@@ -1,3 +1,11 @@
+## Current POC applicability ? SPEC-006@2
+
+Only create_task and create_subtask are in scope through Supabase JS/PostgREST with current anon permissions. No edit/delete/schedule/status, database schema/grant/RLS change, direct pg, or Docker.
+
+This note controls this file when older proposal text below conflicts. For current implementation scope and acceptance criteria, use the SPEC top-level spec.md, plan.md, and tasks.md.
+
+---
+
 # Research: SPEC-006 — ferramentas de escrita e planejamento
 
 **Estado:** evidência para planejamento Draft. Nenhum endpoint, operação privilegiada ou mecanismo de confirmação está aprovado ou habilitado.

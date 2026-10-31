@@ -1,3 +1,11 @@
+## Current POC applicability ? SPEC-002@3
+
+Enable the existing bounded DeepSeek/LangGraph runtime. Only bounded active-chat context and typed data needed for the current turn are sent; chat is not persisted and tracing stays off.
+
+This note controls this file when older proposal text below conflicts. For current implementation scope and acceptance criteria, use the SPEC top-level spec.md, plan.md, and tasks.md.
+
+---
+
 # Research: SPEC-002 runtime and DeepSeek integration
 
 **SPEC**: SPEC-002@2<br>

@@ -1,3 +1,11 @@
+## Current POC applicability ? SPEC-007@2
+
+Only query and create an existing recurring template through Supabase JS/PostgREST. Keep civil values in America/Cuiaba. Do not edit/delete templates or persist occurrences/exceptions.
+
+This note controls this file when older proposal text below conflicts. For current implementation scope and acceptance criteria, use the SPEC top-level spec.md, plan.md, and tasks.md.
+
+---
+
 # Pesquisa técnica — SPEC-007
 
 **Estado:** pesquisa de Draft, baseada no checkout local e fontes primárias. Nenhum timezone/runtime, parser, provedor, schema ou política de confirmação foi aprovado por este documento.

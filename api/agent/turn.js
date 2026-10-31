@@ -1,6 +1,10 @@
+import { createClient } from '@supabase/supabase-js';
+import { getDeepSeekApiKey, getHierarchyCursorSecret } from '../../server/agent/config/secrets.js';
 import { createSafeErrorResponse, httpStatusForOutcome, SAFE_ERROR_CODES } from '../../server/agent/http/errors.js';
+import { createDeepSeekModelAdapter } from '../../server/agent/model/deepseek.js';
 import { composeAgentResponse } from '../../server/agent/runtime/response.js';
 import { RUNTIME_LIMITS, assertResponseBodyWithinLimit } from '../../server/agent/runtime/limits.js';
+import { createAgentTurnRunner } from '../../server/agent/runtime/turn.js';
 import {
   AgentTurnRequestSchema,
   TerminalOutcomeSchema,
@@ -8,8 +12,16 @@ import {
   createTerminalOutcomeDTO,
   createTrustedTurnContext,
 } from '../../server/agent/runtime/state.js';
-import { productionCapabilityPolicy } from '../../server/agent/runtime/capabilities.js';
+import { PRODUCTION_ACCESS_GATE, productionCapabilityPolicy } from '../../server/agent/runtime/capabilities.js';
+import { createToolExecutor } from '../../server/agent/tools/execute.js';
+import { createAgentToolRegistry } from '../../server/agent/tools/registry.js';
 import { assertServerOnlyRuntime } from '../../server/agent/runtime/server-only.js';
+import { createDomainReadTools } from '../../server/domain/read/index.js';
+import { createReadRepository } from '../../server/domain/read/repository.js';
+import { createSupabaseWriteRepository } from '../../server/domain/write/supabase-repository.js';
+import { createWriteCapabilityRegistry } from '../../server/agent/tools/write-capabilities.js';
+import { createSupabaseRecurrenceRepository } from '../../server/domain/recurrence/supabase-repository.js';
+import { createRecurrenceCapabilities } from '../../server/agent/tools/recurrence-capabilities.js';
 
 assertServerOnlyRuntime();
 
@@ -266,10 +278,7 @@ function failedTerminalResponse(request, trustedContext) {
   });
 }
 
-/**
- * Internal route constructor for deterministic synthetic integration tests.
- * Production default export has no runtime and always uses the closed policy.
- */
+/** Internal route constructor for deterministic synthetic integration tests. */
 export function createAgentTurnHandler({
   runTurn,
   capabilityPolicy = productionCapabilityPolicy,
@@ -356,7 +365,65 @@ export function createAgentTurnHandler({
   };
 }
 
+function createProductionTurnRunner() {
+  const environment = process.env;
+  const supabaseUrl = environment.SUPABASE_URL || environment.VITE_SUPABASE_URL;
+  const publishableKey = environment.SUPABASE_PUBLISHABLE_KEY
+    || environment.VITE_SUPABASE_PUBLISHABLE_KEY;
+
+  if (typeof supabaseUrl !== 'string' || supabaseUrl.length === 0
+    || typeof publishableKey !== 'string' || publishableKey.length === 0) {
+    throw new Error('Agent Supabase configuration is unavailable.');
+  }
+
+  const supabase = createClient(supabaseUrl, publishableKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+    },
+  });
+  const repository = createReadRepository(supabase);
+  const writeRepository = createSupabaseWriteRepository(supabase);
+  const recurrenceRepository = createSupabaseRecurrenceRepository(supabase);
+  const domainReadTools = createDomainReadTools(repository, {
+    cursorSecret: getHierarchyCursorSecret(),
+  });
+  const writeCapabilities = createWriteCapabilityRegistry({
+    accessGate: {
+      allowsWrite: async ({ operation }) => PRODUCTION_ACCESS_GATE === 'open'
+        && ['create_task', 'create_subtask'].includes(operation),
+    },
+    writeRepository,
+  });
+  const recurrenceCapabilities = createRecurrenceCapabilities({
+    readTools: domainReadTools,
+    recurrenceRepository,
+  });
+  const toolSet = createAgentToolRegistry(domainReadTools, { writeCapabilities, recurrenceCapabilities });
+  const toolExecutor = createToolExecutor({
+    registry: toolSet.registry,
+    capabilityPolicy: productionCapabilityPolicy,
+  });
+
+  return createAgentTurnRunner({
+    modelAdapter: createDeepSeekModelAdapter({ apiKey: getDeepSeekApiKey() }),
+    toolExecutor,
+    capabilityPolicy: productionCapabilityPolicy,
+    modelTools: toolSet.modelTools,
+    toolRegistry: toolSet.registry,
+  });
+}
+
+let productionRunTurn;
+
+async function runProductionTurn(input) {
+  if (!productionRunTurn) productionRunTurn = createProductionTurnRunner();
+  return productionRunTurn(input);
+}
+
 const defaultHandler = createAgentTurnHandler({
+  runTurn: runProductionTurn,
   capabilityPolicy: productionCapabilityPolicy,
 });
 

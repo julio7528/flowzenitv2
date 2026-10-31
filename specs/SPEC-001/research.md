@@ -1,6 +1,14 @@
+## Current POC applicability ? SPEC-001@3
+
+Public POC access uses only existing Supabase anon permissions. Keep the existing schema, grants, RLS, and app path. No Docker, local PostgreSQL, direct Node pg, service_role, or deployment.
+
+This note controls this file when older proposal text below conflicts. For current implementation scope and acceptance criteria, use the SPEC top-level spec.md, plan.md, and tasks.md.
+
+---
+
 # Research: SPEC-001 server-side integration boundary
 
-**Date:** 2026-10-28  
+**Date:** 2026-10-28
 **State:** Planning evidence for Draft SPEC-001; no runtime decision is approved here.
 
 ## Repository baseline

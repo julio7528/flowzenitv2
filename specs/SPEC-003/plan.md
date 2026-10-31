@@ -1,156 +1,98 @@
-# Plano técnico: histórico, memória e checkpoints
+# Plano técnico — SPEC-003 histórico conversacional persistente
 
-**SPEC ID**: `SPEC-003` | **Versão**: `1` | **Manifest hash**: atribuído somente ao criar lote  
-**Branch**: `main` preservada | **Data**: 2026-10-28 | **Spec**: [spec.md](spec.md)  
-**Status**: Draft — arquitetura proposta; não autoriza implementação.
+**SPEC ID**: SPEC-003 | **Versão**: 4 | **Manifest hash**: atribuído somente ao criar lote
+**Branch**: main preservada | **Data**: 2026-10-29 | **Spec**: [spec.md](spec.md)
+**Status**: Draft — revisão POC; não autoriza implementação sem manifesto aprovado
 
-## Resumo
+## Decisões de arquitetura
 
-SPEC-003 propõe persistir o histórico visível do proprietário único separado do estado interno do LangGraph. O histórico canônico é uma sequência ordenada de mensagens de uma conversa; o checkpointer guarda snapshots internos necessários a uma execução/interrupção; a compactação é um resumo derivado, versionado e limitado à mesma conversa; store de memória semântica entre conversas fica desligado; dados transacionais continuam nas entidades existentes; auditoria continua sob SPEC-010, com metadados mínimos.
+- Preservar React/Vite, JavaScript ESM, Node.js 24, LangGraph.js 1.5.3, LangChain.js e Supabase PostgreSQL.
+- Usar @langchain/langgraph-checkpoint-postgres 1.1.2 e node-postgres (pg) como checkpointer oficial. NPM metadata confirma Node >=18, @langchain/core ^1.1.44 e @langchain/langgraph-checkpoint ^1.2.0; o checkout tem core 1.3.1, LangGraph 1.5.3 e checkpoint 1.2.1. O contrato ESM é compatível.
+- PostgresSaver aceita pool pg fornecido e schema configurável. Node 24 permite TCP/TLS; não é runtime Edge. Supabase PostgreSQL de desenvolvimento foi confirmado como 17.11. A compatibilidade de conexão do runtime Vercel e o pooler de produção permanecem não verificados e não serão ativados nesta SPEC.
+- Não chamar PostgresSaver.setup() em inicialização de Function. Sua implementação executa CREATE SCHEMA e itera migrations automaticamente. A migration da SPEC copia e registra explicitamente as seis migrações da versão fixada 1.1.2, dentro de conversation_private, para que a versão instalada não tente DDL em runtime. Upgrade do pacote requer uma migration revisada.
+- Implementar ConversationRepository, CheckpointAdapter, TurnCoordinator, CheckpointResume, ConversationLifecycle, DeletionService, ContextBuilder, ContextSummary e MemoryAccessGate. Não modificar a porta ou o ledger de SPEC-002; integrar por adaptador.
+- O armazenamento e testes são internos. Nenhum endpoint, cliente frontend, credencial service_role ou provider é ligado à conversa real enquanto DEC-001/006 estiverem fechadas.
 
-O candidato para checkpoints é `@langchain/langgraph-checkpoint-postgres`, que usa PostgreSQL e aceita schema configurável; ainda depende de validação de compatibilidade com o runtime e Supabase/DEC-010. A API oficial separa checkpointer por thread de store cross-thread, então a proposta não configura LangGraph Store. Não criar tabelas, executar `setup()`, instalar pacote ou persistir conversa nesta fase. DEC-005 bloqueia produção até a política de retenção/deleção/exportação/compartilhamento ser aprovada; DEC-001 bloqueia qualquer endpoint privado até um controle de acesso separado ser aprovado, implementado e verificado.
+## Decisão DEC-005 com escopo limitado
 
-## Contexto técnico
+A política dec005-spec003-v1, aprovada pelo proprietário neste escopo, cobre apenas conversa, checkpoint e resumo da SPEC-003. Não muda o estado global PENDING da DEC-005 para audit, memória de outro tipo ou outras SPECs.
 
-**Linguagem/runtime**: JavaScript ESM; Node/runtime não está pinado e depende de DEC-010.  
-**Dependências existentes**: o `package.json` não inclui `@langchain/langgraph` nem checkpointer; o pacote Postgres é candidato pesquisado, não instalado nem aprovado.  
-**Storage atual**: Supabase PostgreSQL usado pelo frontend para demandas/rotinas e schema operacional `sdd`; não há storage de conversas. O schema `sdd` e `sdd.checkpoints` pertencem exclusivamente ao runner e não podem ser reutilizados.  
-**Storage candidato**: schema privado e isolado para tabelas de histórico mais schema configurado do checkpointer LangGraph. Nomes, grants, migration strategy e conexão seguem pendentes; nenhuma tabela é aprovada aqui.  
-**Testes existentes**: `npm test` chama `node --test`; não há teste de chat, histórico ou checkpointer. Nenhum teste foi executado no planejamento.  
-**Limites**: nenhuma persistência real, consulta privada, endpoint ou envio de transcrição a um provedor enquanto DEC-001, DEC-005/006 e gates do runtime não estiverem satisfeitos.
-
-## Constitution Check
-
-| Princípio | Avaliação |
+| Artefato | Prazo e ação |
 |---|---|
-| I. Preservar comportamento | As tabelas de domínio e o cliente React/Vite não mudam. Histórico é storage aditivo, nunca reaproveita `demandas`, `recorrente` ou `sdd`. |
-| II. Escopo do usuário | Nenhum usuário/tenant novo, método de autenticação, retenção, exportação ou batch é aprovado. Planos e storage ficam Draft. |
-| III. Segurança | Sem conteúdo em frontend, logs, trace ou audit genérico. Queries privadas permanecem fail-closed; controle de acesso não é escolhido aqui. |
-| IV. Testes | Fixtures sintéticas cobrem paginação, replay, concorrência, corrupção, expiração e apagamento; gates não executados ficam `NOT VERIFIED`. |
-| V. Durabilidade | Checkpoint e ledger têm protocolos distintos; retomar ferramenta exige resultado durável consultável. Nenhuma memória de execução do SDD é reutilizada. |
-| VI. Limites | 5 tentativas/120 minutos do runner continuam inalterados; limites de contexto/chamadas seguem DEC-011/012 e SPEC-002, sem números inventados. |
-| VII. Mudança mínima | Checkpointer existente da biblioteca é avaliado antes de custom saver; nenhuma dependência ou migration é criada agora. |
-| VIII. Publicação manual | Não há commit, push, merge, deploy ou alteração de dados. |
+| Conversa e mensagens | Expirar 365 dias após última atividade válida. Cada turno aceito atualiza last_activity_at e expires_at. Verificar antes de toda leitura; purge em acesso ou rotina administrativa. |
+| Checkpoints e pending writes/blobs | Máximo 30 dias desde última atualização válida, limitado por conversation.expires_at. Checkpoint expirado nunca retoma ferramenta. |
+| Summary derivado | Mesmo conversationId e prazo da conversa; apagar quando a conversa expirar/deletar. |
+| Deleção solicitada | Transação muda active para deleting; negar novas leituras/escritas; cancelar ou reconciliar turnos; remover artefatos. Falha parcial segue deleting até retry idempotente concluir. Sem grace, soft-delete de conteúdo ou tombstone de conteúdo. |
+| Exportação | DTO JSON interno com mensagens canônicas e metadados mínimos; sem credenciais, raciocínio, checkpoint bruto ou payload privado. Sem endpoint enquanto DEC-001 fechada. |
+| Compartilhamento | Desativado; nenhum link ou suporte multiusuário/tenant. |
+| Auditoria operacional | Metadados allowlisted, sem conteúdo; eventos próprios podem durar até 30 dias pós-deleção quando outro contrato não exigir prazo maior. Não alterar ledger SDD. |
 
-## Modelo de confiança e responsabilidades
+Sem cron/worker assumido, executar expiração em acesso antes do conteúdo e disponibilizar operação administrativa de manutenção para expurgo exato. O operador não recebe uma chave service_role para acessar histórico pela API. Um job agendado futuro permanece requisito operacional separado.
 
-| Artefato | Fonte/owner | Uso e visibilidade | Tratamento proposto |
-|---|---|---|---|
-| Histórico canônico | SPEC-003 | Conversas paginadas que a UI pode exibir após gate. | Mensagens user/assistant finais e resumo seguro de tool; ordem imutável. |
-| Checkpoint LangGraph | SPEC-002 port; persistência SPEC-003 | Execução interna por thread/superstep, nunca histórico da UI. | Versionado, schema-validado, não exportado como mensagem; pode conter cópia limitada do contexto de execução. |
-| Context summary | Derivado da conversa, sem store cross-thread | Auxilia contexto de uma conversa quando a história excede orçamento. | Versionado com `throughMessageSeq`; nunca altera/apaga transcript e não é verdade transacional. |
-| Memória semântica longa | Fora do escopo | Preferências/fatos entre threads. | Não criar LangGraph Store, embedding ou retrieval de transcript nesta SPEC. |
-| Dados de domínio | SPEC-004/006/007 | Fonte de verdade para demands, status, datas e rotinas. | Reconsultar ferramenta tipada; não inferir estado atual de resumo/checkpoint. |
-| Ledger de execução | SPEC-002 | Idempotência e outcome de tool/turn. | Verificar antes de retomar side effect; não duplicar implementação em SPEC-003. |
-| Audit/observability | SPEC-010 | Metadados operacionais minimizados. | Sem conteúdo de conversa ou checkpoint; retenção/fields seguem DEC-005/006. |
+## Modelo de dados e migration proposta
 
-Histórico e checkpoint têm finalidade e acesso distintos, embora um snapshot do graph possa conter cópia de mensagens recentes necessárias para retomar o turno. Essa duplicação potencial recebe classificação e ciclo de vida próprios; checkpoint não é a fonte canônica do transcript e nunca é serializado à resposta de histórico.
+Criar schema privado conversation_private, ausente no projeto verificado, separado de public e sdd. Não adicioná-lo a exposed schemas. REVOKE explícito de PUBLIC, anon, authenticated e service_role para schema, tabelas, sequences e rotinas; habilitar RLS sem policies nas tabelas de conteúdo como defesa adicional. Não criar grants novos, policies amplas, triggers de public API ou acesso de browser. Nenhuma tabela de produto ou migration histórica será modificada.
 
-## Arquitetura proposta
+Tabelas aditivas no schema privado:
+- conversations: conversation_id (texto UUID opaco para FK direta do PostgresSaver.thread_id), lifecycle, created_at, last_activity_at, expires_at, next/last message sequence e policy_version.
+- messages: message_id, conversation_id, message_seq, turn_id, request key/dedupe key, role/origin allowlisted, content canônico e created_at; unique por conversa/sequência e chave de dedupe.
+- turn_reservations: conversa/request key, payload hash, turn id, estado terminal/reservado e referência segura de replay; unique por conversa/request. Serializar operações por lock de linha da conversa.
+- checkpoint_envelopes: referência a thread/namespace/checkpoint, versões de graph/state/serializer, turn/correlation, digest, ledger refs não sensíveis, updated_at/expiry; FK composta para tabelas oficiais do saver e cascade de deleção.
+- context_summaries: intervalo exato de messageSeq, versão de formato/gerador, origem e payload derivado, por conversa.
+- deletion_operations: request ID, estado e metadados mínimos de ciclo de vida; sem conteúdo e purge após até 30 dias.
 
-```mermaid
-flowchart LR
-  C[Request privado, gate DEC-001] --> T[TurnCoordinator + idempotência SPEC-002]
-  T --> H[ConversationRepository]
-  H -->|ordered transcript + snapshot cursor| B[ContextBuilder]
-  B --> G[LangGraph runtime SPEC-002]
-  G -->|internal graph state| CP[CheckpointPort / PostgresSaver candidate]
-  G -->|safe final answer| H
-  G -->|tool proposal/outcome| L[ExecutionLedger SPEC-002]
-  H --> UI[History response: paginated messages only]
-  G --> A[Safe metadata event SPEC-010]
-  A -. never content .-> H
-```
+Replicar as tabelas oficiais do PostgresSaver 1.1.2: checkpoint_migrations, checkpoints, checkpoint_blobs e checkpoint_writes. Criar conversations antes do saver tables. Registrar versões oficiais 0…5 na tabela de migrations para impedir setup em runtime de tentar executar DDL. Conservar as tabelas oficiais compatíveis; os índices e FK adicionais serão explícitos e testados.
 
-`DEC-001` gate precede qualquer leitura do histórico ou checkpoint. Mesmo um `conversationId` correto, aleatório ou difícil de adivinhar só localiza dados; não autentica nem autoriza. Sem gate, responder `ACCESS_DISABLED` antes de chamar repository/checkpointer.
+Migration versionada com supabase migration new. Aplicar após aprovação do lote, somente por Supabase MCP ao project ref twikxeloeftczwbpjvzr. Conferir project/schema/roles antes e depois; nunca tocar sdd ou tabelas product. A migration é aditiva e não cria credenciais, usuários ou acesso Data API.
 
-### Módulos futuros e ownership
+## Operações
 
-| Caminho proposto | Responsabilidade | Dono |
-|---|---|---|
-| `server/agent/memory/conversation-contracts.js` | DTOs de conversa/mensagem/cursor e envelopes de erro. | SPEC-003; endpoint é SPEC-001/002. |
-| `server/agent/memory/conversation-repository.js` | Append idempotente, paginação por snapshot/sequence, estado de lifecycle e read-back. | SPEC-003; transação/adaptador depende DEC-010. |
-| `server/agent/memory/context-builder.js` | Context window baseado em transcript, orçamento e summary versionado; não acessa banco sem gate. | SPEC-003; runtime/provider budget integra SPEC-002. |
-| `server/agent/memory/checkpoint-envelope.js` | Validar thread, graph/state version, turno, serializer envelope, integridade/expiry e ledger preconditions. | SPEC-003 sobre `CheckpointPort` SPEC-002. |
-| `server/agent/memory/lifecycle.js` | Guardar deletion/expiry workflow sob política aprovada; bloquear leituras e turns durante exclusão. | SPEC-003/DEC-005. |
-| `server/agent/persistence/ports.js` | Interface existente de checkpoint/ledger. | SPEC-002; adaptar por contrato, não reimplementar. |
-| `server/agent/observability/safe-events.js` | IDs e categorias não sensíveis, sem conteúdo. | SPEC-002/SPEC-010. |
-| `tests/fixtures/conversation/` | Mensagens, checkpoint envelopes, ledger outcomes, races e corruption sintéticos. | Testes. |
+### Gate e request path
+MemoryAccessGate executa antes de qualquer repository/checkpointer/ledger/private handler. Enquanto DEC-001 fechada, retorna ACCESS_DISABLED. O endpoint já fechado de SPEC-002 permanece assim. Testes devem contar zero invocações privadas inclusive em erro e replay.
 
-Todos os caminhos são propostas e não existem no checkout. A chamada HTTP permanece desabilitada e sob SPEC-001/002. O frontend React/Vite não recebe uma chave de Supabase, token de ferramenta, checkpoint nem acesso direto ao novo storage.
+### Histórico
+IDs UUID opacos são validados server-side. Primeira página captura snapshotMaxMessageSeq. Cursor autenticado contém versão, conversation id, pageSize, snapshot maximum e last sequence. Limitar pageSize entre 1 e 100; default 50. Continuations leem lastSeq < messageSeq <= snapshotMax e ordenam por sequence ascendente. Cursor inválido, adulterado, de outra conversa ou de outro pageSize não lê conteúdo. Novas mensagens após o snapshot ficam para uma nova paginação. Não prometer um snapshot MVCC estável entre requisições ou depois de exclusões.
 
-## Persistência e checkpoint
+### Turno e idempotência
+Sob lock de linha da conversa, inserir/revalidar turn reservation por (conversation, request key), comparando hash de payload. Mesmo hash retorna outcome/replay existente; hash divergente retorna conflict. Alocar messageSeq e persistir append sob a mesma transação. Só uma execução por conversa. O ExecutionLedger de SPEC-002 continua fonte de verdade para side effects; started/uncertain/missing impede reexecução. Não criar ferramentas de escrita.
 
-- Histórico candidato em tabelas aditivas de schema privado dedicado, separado do schema operacional `sdd`. A proposta lógica é `conversations` e `messages`; nenhuma DDL/role/RLS/grant é selecionada.
-- `conversation_id` opaco UUID pode também ser o `thread_id` LangGraph (mesmo identificador, 1:1) para simplificar associação; tem tamanho compatível com o limite documentado pelo checkpointer, mas nunca é `owner_id` ou prova de autorização. Confirmar se manter IDs separados melhora o adaptador na spike.
-- `message_seq` monotônico por conversa e chave única `(conversation_id,message_seq)` ordenam transcript. Atribuição é transacional; cursor inclui `snapshotMaxSeq` e `lastMessageSeq`, limitando páginas ao snapshot capturado e evitando repetição quando chegam mensagens novas.
-- `PostgresSaver` é candidato para checkpointer; a documentação LangGraph.js mostra suporte a schema explícito e `setup()` para as tabelas internas. Nenhum código executará `setup()` na inicialização da Function; versão, DDL, schema, grants e upgrade devem ser revisados/aplicados como operação SDD aprovada e isolada. O adapter usa a porta SPEC-002.
-- Envelopes guardam `thread_id`, `checkpoint_ns`, `checkpoint_id`, `parentCheckpointId`, `graphVersion`, `stateSchemaVersion`, `turnId`, `serializerVersion`, referência/estado do ledger e, se aprovado, `expiresAt`. Versões/turno podem ficar no metadata do checkpoint sem alterar a assinatura compartilhada da porta; confirmar compatibilidade no teste de contrato.
-- Antes de retomar: gate de acesso; ID e namespace conferidos; checkpoint presente, válido, íntegro e dentro do prazo da política; graph/state/serializer compatíveis; estado dos tools resolvido no ledger. Qualquer falha termina em `NOT_FOUND`, `EXPIRED`, `CORRUPT`, `INCOMPATIBLE` ou `LEDGER_UNRESOLVED`, sem executar tool pendente.
-- Hash/digest do payload é candidato para detectar corrupção acidental, não autenticidade nem autorização. Serializer e version validator continuam necessários. Assinatura/criptografia adicional permanece alternativa a pesquisar/aprovar, sem prometer segurança pela hash.
-- Expiração, pruning e tombstone são calculados somente a partir da DEC-005 aprovada. Enquanto pendente, não há TTL, purge schedule ou persistência de produção.
+### Checkpoint e retomada
+CheckpointAdapter usa PostgresSaver em schema explícito, com um Pool injetado e sem setup automático. Salvar envelope em tabela própria associada ao checkpoint ID. O envelope declara GRAPH_VERSION de SPEC-002, state schema/serializer version, turn ID, correlation ID, digest e ledger references. Resume preflight valida todas as versões/associações/digest/expiry e consulta ledger antes de chamar graph.invoke. Se qualquer verificação falhar, zero handlers de ferramenta. Expirar/remover checkpoint não apaga transcript.
 
-## Histórico, idempotência e concorrência
+### Retenção e deleção
+Cada operação de acesso chama assertConversationUsable, que compara clock confiável com expires_at e marca deleting/realiza remoção antes de retornar bytes. Cleanup faz transação para bloquear, sinaliza cancelamento/consulta terminal do turno, remove messages/summaries, checkpoint_envelopes e todas as linhas do saver pelo thread_id, e confirma zero artefatos antes de remover conversation. Falha mantém deleting e retorno bloqueado. Retry é idempotente. Limpeza em acesso e comando administrativo cobrem falta de scheduler.
 
-Cada request recebe `requestId` e `turnId` do servidor. `conversationId` pode ser fornecido como um localizador opaco; ids inválidos/ausentes recebem outcome estável. User message, final assistant message e terminal turn outcome se associam ao mesmo `turnId` e à reserva idempotente do ledger, para retry retornar a resposta já gravada sem duplicar mensagens nem invocar de novo ferramenta concluída.
+### Contexto
+ContextBuilder recebe limite e estimator do runtime SPEC-002 e opera somente após gate. Ele escolhe mensagens completas e recentes sem ultrapassar o budget. Não trunca item estruturado. Se necessário, usa summary sintético/injetado da mesma conversa com from/through seq e formato; não chama DeepSeek/Gemini e não inclui fatos transacionais derivados como atuais. Transcript permanece imutável. Cursor e compaction version aparecem no contexto interno.
 
-Uma única execução mutável por conversa é a política técnica recomendada para revisão: usar uma reserva/lease compare-and-set em armazenamento durável; segunda requisição em andamento recebe `TURN_IN_PROGRESS` ou fica serializada conforme DEC-010/configuração aprovada. Não aceitar atualizações concorrentes de contexto. A decisão final queue-versus-conflict fica pendente de teste/runtime, mas nenhum caminho pode duplicar `message_seq` ou executar side effects concorrentes sem ledger.
+## Privacidade e acesso
 
-On active turn: interruption conserva status resumível apenas com checkpoint e ledger conclusivos; timeout/cancelamento sem status durável não vira `completed`. No resume, a execução usa exatamente o mesmo `thread_id`/turn context e graph version. Já concluído no ledger significa devolver outcome; `started`/`uncertain` sem resultado conhecido bloqueia replay; `not started` só pode retomar se o checkpointer comprovar ponto seguro e nenhuma tool pendente.
+- Cursor HMAC key e connection string são server-only, injetados em runtime; nenhuma chave fixa, VITE_ ou log de conteúdo. Ausência de configuração mantém adapter indisponível. A rotina administrativa exige project ref esperado e valida que SUPABASE_URL e host/usuário do connection string apontam ao mesmo projeto; divergência ou ausência encerra antes de qualquer SQL.
+- Supabase Secret/service_role não autentica o proprietário e não é usado como adaptador de conversation repository.
+- Sem query de conversas reais, envio externo, tracing privado ou acesso via UI.
+- Fixtures sintéticas carregam IDs exclusivos. Registros persistidos durante testes são listados e removidos individualmente em ordem FK; verificar contagem zero depois. Preferir transaction/rollback onde o canal permitir.
 
-Para delete race, proposta: transação marca lifecycle `deleting`, bloqueia novos reads/appends; sinaliza cancelamento da execução; aguarda terminal/outcome ou deixa ledger recuperar resultado; então apaga transcript, summaries e checkpoints no escopo aprovado. Uma tombstone não contém conteúdo e só existe se DEC-005 permitir. Sem DEC-005, esse fluxo é apenas contrato para fixtures, não serviço habilitado.
+## Estratégia de testes e quality gates
 
-## Contexto e compactação
+1. Unit: ID/cursor/HMAC/page size, budget, whole-message, envelopes, versions, digest, gate e redaction.
+2. Contract LangGraph: adaptador conserva thread/namespace/checkpoint e versão; replay respeita ExecutionLedger e nunca executa outcome concluído.
+3. PostgreSQL do Supabase: usar Supabase SQL MCP no projeto de desenvolvimento existente para schema/access ACL, inserts sintéticos, constraints, transações, expiry/deletion e cleanup. Confirmar projeto, schema, privilégios e ausência do marcador antes do primeiro write; preferir rollback e, quando o canal não permitir, remover apenas IDs sintéticos capturados.
+4. Race/fault injection: duplicate same key; divergent payload conflict; two same-thread turns; deletion during active turn; injected mid-delete failure; retry completion; incompatible checkpoint and uncertain ledger; pagination after new messages.
+5. Privacy: DEC-001 closed => zero calls; no transcript in errors/log/trace/provider/client bundle; no private schema in browser.
+6. Project gates: npm test, npm run lint, npm run build, server-only bundle checks, all relevant security and contract checks; independent read-only final audit.
 
-`ContextBuilder` calcula envelope de entrada dentro do limite efetivo de SPEC-002/model/provider. Nenhum valor numérico é escolhido aqui; limite real depende DEC-011/012 e teste de payload. Reserva espaço a instruções, resposta e tools conforme configuração futura. Mantém mensagens recentes inteiras até caber, sem truncar payload no meio de mensagem. Para contexto antigo, estratégia proposta em duas fases: primeiro janela recente com indicação explícita de omissão; depois resumo por conversa versionado quando DEC-006 autorizar enviar o conteúdo a um provedor.
+No Docker, local PostgreSQL, database branch, or test-only Node TCP connection is required for POC completion. A direct Node-to-PostgreSQL test remains optional; if not run, it is recorded as NOT VERIFIED and is never described as a pass. Node adapter behavior is covered by contract tests with a deterministic pool double; SQL MCP separately proves database behavior. Runtime PostgresSaver configuration remains server-only and must point to the same Supabase PostgreSQL project when the runtime is enabled. No migration/test may write outside `conversation_private` or touch pre-existing product rows. Every actual gate result gets a concise supervisor evidence record.
 
-Resumo registra `[fromMessageSeq, throughMessageSeq]`, versão do formato/gerador, `sourceTranscriptVersion` e timestamp; regeneração nunca altera transcript. Conteúdo resumido é derived conversation data com mesma política de acesso/lifecycle, nunca memória cross-thread. Resumo pode informar contexto geral mas não deve responder status, data, hora ou vínculo transacional exato; consultas chamam SPEC-004. Quando summary estiver ausente/stale, reconstruir a partir do transcript conforme budget ou pedir esclarecimento; não inventar memória.
+## Limitações deliberadas
 
-Durante planejamento/testes, sumarização usa doubles determinísticos e dados sintéticos. Nenhum texto real de conversa é enviado a DeepSeek, Gemini ou LangSmith antes de DEC-006; persistência real continua bloqueada por DEC-005 e DEC-001.
+- SDD status confirms SPEC-001@2, SPEC-002@2, SPEC-004@2 COMPLETED. No competing batch is active.
+- Project ref and Postgres 17.11 were verified. Schema names conversation_private and agent_memory were absent; only sdd existed among the checked schemas.
+- The direct Node adapter connection is not required to complete this POC gate. DEC-001 remains closed, so no storage is wired to a live private request. Real SQL contract checks use the project-bound Supabase MCP after admission.
+- Vercel's actual production region, runtime DB configuration, service access, and pooler mode are not validated by this planning artifact and remain disabled.
+- No scheduler is present/assumed. Expiration is enforced on access and by explicit maintenance invocation; scheduled expiry is not claimed.
 
-## Dependências e decisões
+## Existing compatibility
+SPEC-002 ports are server/agent/persistence/ports.js: CheckpointPort.load/save and ExecutionLedger.reserve/recordStarted/recordOutcome/lookup. Do not change SPEC-002 files. Map metadata via versioned envelope and inject the ledger. The current StateGraph is real LangGraph and graph version is agent-turn-v1. Tool registry remains read-only under DEC-001.
 
-| Pendência | Impacto e limite |
-|---|---|
-| DEC-001 | Bloqueia todo histórico/checkpoint privado e endpoint até controle de acesso adequado separado ser aprovado, implementado e verificado. Não escolher Auth, owner ID, session ou grant. |
-| DEC-005 | Retenção, exclusão, exportação e compartilhamento; bloqueia produção de histórico/checkpoint/summary e definição de TTL, purge e tombstone. |
-| DEC-006 | Disclosure, campos, redaction, retention/localização do provedor; bloqueia summarization/compaction com conversas reais e LangSmith. |
-| DEC-010 | Runtime, pool, schema, region, background/worker; bloqueia escolha da conexão/checkpointer e lifecycle purge. |
-| DEC-011 / DEC-012 / SPEC-002 | Modelo/context window e uso; bloqueia limite numérico e contrato final de compaction budget. |
-| SPEC-002 | CheckpointPort, ExecutionLedger, graph/state metadata e terminal outcomes; integration contract must preserve completed tool outcomes. |
-| SPEC-010 | Auditoria persistente/trace; SPEC-003 não cria evento store concorrente. |
-
-DEC-002/003 permanecem aprovadas; este escopo não cria entidades de domínio e datas do histórico são timestamps do sistema, sem alterar America/Cuiaba scheduling values.
-
-## Quality gates futuros
-
-| Gate | Evidência |
-|---|---|
-| Unitário | DTOs, cursor/snapshot pagination, state classification, context-budget planner, summary provenance, expiry/version validators. |
-| Contrato LangGraph | CheckpointPort round trip, namespace, graph/state/serializer versions, corrupt payload, migration compatibility, pending writes and resume semantics. |
-| Integração isolada | Append/retrieval, monotonic ordering, duplicate turn, concurrent turn serialization, checkpoint+ledger outcomes, delete race and retention fixture. |
-| Segurança | DEC-001 closed = zero repository/checkpointer calls; thread IDs/cursors not auth; no transcript in client bundle/logs/audit; no synthetic tenant/owner support. |
-| Privacidade | synthetic secret sentinels prove hidden tool state/provider payload not returned or logged; delete removes all retrievable derived rows under a test policy. |
-| Geral | `npm test`, `npm run lint`, `npm run build`, record actual exits. No test was run in planning. |
-
-## Entrada e conclusão
-
-**Entrada de implementação**: SPEC-003@1 admitted through an explicitly approved batch; SPEC-001/002 compatible; DEC-001 control separately approved/implemented/verified; DEC-005 retention/deletion/export/sharing approved; DEC-006 provider treatment approved before any transcript summary is sent externally; DEC-010 store/runtime adapter reviewed; required DEC-011/012 context bounds configured. Without those, implement/test only synthetic adapters and keep production persistence disabled.
-
-**Conclusão**: history paging deterministic; duplicate/replay safe; resume never executes pending operation without ledger proof; corrupt/expired/version-incompatible checkpoint stops; conversation categories remain separate; context stays within configured budget without rewriting history; deletion scope is verified under an approved test policy; production endpoints remain gated until security/lifecycle decisions are met.
-
-## Estrutura documental e caminhos de fonte futuros
-
-Documentos: `specs/SPEC-003/{spec.md,plan.md,research.md,data-model.md,quickstart.md,tasks.md}`, `contracts/{conversation-history.md,checkpoint-resume.md,context-compaction.md,lifecycle-deletion.md}`, e `checklists/requirements.md`.
-
-```text
-server/agent/memory/{conversation-contracts,conversation-repository,context-builder,checkpoint-envelope,lifecycle}.js
-server/agent/persistence/ports.js  (SPEC-002 owner; compatible interface only)
-tests/fixtures/conversation/{messages,checkpoints,ledger,races}.js
-tests/unit/conversation/{cursor,context,checkpoint-envelope}.test.js
-tests/contracts/conversation/{history,checkpoint,ledger,lifecycle}.test.js
-tests/integration/conversation/{pagination,resume,concurrency,deletion,access-gate}.test.js
-supabase/migrations/  (only after DEC decisions and exact approved SPEC/batch authorize schema work)
-```
-
-Nenhum caminho de código, package, database schema ou endpoint é criado nesta fase.
+## Entry and completion
+Entry requires exact approved manifest containing SPEC-003@4 and successful supervisor admission. Execute through sdd-run only. Completion requires all tasks in the v4 task file, all FR/SC evidence, actual required commands, SQL MCP synthetic checks and cleanup verification, no unresolved required failures, independent auditor PASS, DEC-001 closed, and SDD completion. No deployment or publication.

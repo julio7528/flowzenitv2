@@ -13,7 +13,7 @@ Run this workflow only when the user explicitly asks to execute a batch and supp
 
 1. Read the project `AGENTS.md` and this skill. Use `npm run sdd -- status <batch-id>` and `npm run sdd -- validate <batch-id>`.
 2. Confirm the batch is `APPROVED` or is `RUNNING` under this same active session. Verify the approval timestamp/actor, exact manifest hash, ordered SPEC IDs, and immutable versions from Supabase. The manifest is the sole execution allowlist.
-3. Never add or reorder SPECs. If the batch is `PAUSED`, stop. The user must authorize resumption through the privileged Supabase SQL channel. Do not infer authorization from an earlier approval.
+3. Never add or reorder SPECs. If the target batch is `PAUSED`, stop. The user must authorize resumption through the privileged Supabase SQL channel; do not infer authorization from an earlier approval. An unrelated paused batch does not block a separate batch when its exact manifest is approved, all declared dependencies are complete, no duplicate SPEC is active, and writable scopes are disjoint. Do not change or implicitly resume the paused batch.
 4. If a `RUNNING` batch has an expired lease, call `npm run sdd -- recover <batch-id>`. This only stops and persists the interrupted batch. Then stop and report that explicit user authorization is required to resume.
 5. If the service credential, migration, manifest, authorization, or data integrity check is unavailable or inconsistent, do not start work.
 
@@ -21,7 +21,7 @@ Run this workflow only when the user explicitly asks to execute a batch and supp
 
 For an approved batch, claim it once using `npm run sdd -- claim <batch-id> --owner <session-id> --key <uuid>`. Keep the lease token only in the active Codex session; pass it to every operational write. Never place it in the repository, SPECs, checkpoints, events, or reports.
 
-Call `npm run sdd -- next <batch-id> --lease <token> --owner <session-id>` to obtain the next SPEC snapshot. If the response says `complete`, finish. Do not begin a later SPEC until `sdd_complete_spec` has passed for the current one.
+Call `npm run sdd -- next <batch-id> --lease <token> --owner <session-id>` to obtain the next SPEC snapshot. If the response says `complete`, finish. Do not begin a later SPEC in the same manifest until `sdd_complete_spec` has passed for the current one. A separate batch may run only when its declared dependencies are complete and its task scopes do not overlap active work in another batch.
 
 For each SPEC:
 
@@ -30,7 +30,13 @@ For each SPEC:
 3. Treat subagents as trusted collaborators, not a security boundary. Give each the active SPEC, task, file scope, relevant contracts, and no unrelated work. Disable or interrupt agents if the batch is paused.
 4. Run required project quality gates and SPEC-specific checks. Record exact command, exit code, and concise evidence. Never mark an unexecuted test passed or skip a required gate. Required passed command gates must include exit code `0`.
 5. Persist useful checkpoints without secrets, prompts, transcripts, or credentials.
-6. Call `sdd_complete_spec` only after all executable tasks are completed, no unresolved failure remains, and at least one required quality gate plus every other required gate is `PASSED`.
+6. Call `sdd_complete_spec` only after all executable tasks are completed, no unresolved failure remains, and at least one required quality gate plus every other required gate is `PASSED` or has an exact authorized `WAIVED` record. Report waivers separately from passes.
+
+## Snapshot-declared gate waivers
+
+For a SPEC version registered after the waiver migration, an optional `## Gate waiver policies` table in `plan.md` may declare exact gate keys and one policy per gate: `NEVER`, `ALTERNATIVE_EVIDENCE`, `UNAVAILABLE`, or `ALTERNATIVE_AND_UNAVAILABLE`. Missing entries default to `NEVER`; the registered mapping is part of the immutable SPEC snapshot. Never edit a registered SPEC to change eligibility.
+
+The runner may use `prepare-waiver` to validate the current batch, manifest, run, gate, evidence basis, and snapshot policy, then print the exact owner SQL. The runner must never execute `sdd_authorize_gate_waiver`; only the privileged owner SQL/MCP channel can authorize it after explicit user approval. A known failing check cannot use `UNAVAILABLE`. Preserve `WAIVED` as a distinct outcome in status, events, completion summaries, and reports.
 
 ## Failure correction and hard limits
 

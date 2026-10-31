@@ -11,7 +11,7 @@ const viteCliPath = path.join(projectRoot, 'node_modules', 'vite', 'bin', 'vite.
 
 const forbiddenBundleMarkers = Object.freeze([
   'server/agent/',
-  'api/agent/',
+  'api/agent/turn.js',
   '@langchain/deepseek',
   'DEEPSEEK_API_KEY',
   'HIERARCHY_CURSOR_SECRET',

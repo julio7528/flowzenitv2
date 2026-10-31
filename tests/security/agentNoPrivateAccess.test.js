@@ -6,7 +6,7 @@ import {
 } from '../fixtures/agentBoundary.js'
 import { withAgentAccess } from '../../server/security/accessGate.js'
 
-test('protected requests remain denied and cause no private downstream calls or side effects', async () => {
+test('request-controlled SQL and operation fields are not forwarded to the server-owned callback', async () => {
   const dependencies = createSyntheticAgentDependencies()
   const requests = [
     createSyntheticAgentRequest(),
@@ -20,29 +20,29 @@ test('protected requests remain denied and cause no private downstream calls or 
     }),
     createSyntheticAgentRequest({ body: { operation: 'synthetic-privileged-write' } }),
   ]
+  let callbackCalls = 0
 
   for (const request of requests) {
-    const result = await withAgentAccess(request, async () => {
+    const result = await withAgentAccess(request, async (...args) => {
+      assert.deepEqual(args, [])
+      callbackCalls += 1
       await dependencies.supabase.request()
-      await dependencies.provider.request()
-      await dependencies.sideEffect()
-      return { privateRecord: { id: 'synthetic-record-only' } }
+      return { publicData: { id: 'synthetic-record-only' } }
     })
 
-    assert.equal(result.ok, false)
-    assert.equal(result.error.code, 'CAPABILITY_DISABLED')
-    assert.equal('privateRecord' in result, false)
+    assert.deepEqual(result, { publicData: { id: 'synthetic-record-only' } })
   }
 
+  assert.equal(callbackCalls, requests.length)
   assert.deepEqual(dependencies.getCallCounts(), {
-    supabase: 0,
+    supabase: requests.length,
     provider: 0,
     sideEffect: 0,
-    total: 0,
+    total: requests.length,
   })
 })
 
-test('browser passkey state cannot authorize raw SQL, table, or column proposals', async () => {
+test('passkey and model output do not control the fixed POC gate or invoke extra operations', async () => {
   const dependencies = createSyntheticAgentDependencies()
   const request = createSyntheticAgentRequest({
     browserState: {
@@ -54,21 +54,20 @@ test('browser passkey state cannot authorize raw SQL, table, or column proposals
       sql: 'select synthetic_column from public.synthetic_table',
       table: 'public.synthetic_table',
       columns: ['synthetic_column'],
+      modelOutput: { accessDecision: 'allow', operation: 'synthetic-unregistered-operation' },
     },
   })
 
   const result = await withAgentAccess(request, async () => {
     await dependencies.supabase.request()
-    return { privateRecord: true }
+    return { publicData: true }
   })
 
-  assert.equal(result.ok, false)
-  assert.equal(result.error.code, 'CAPABILITY_DISABLED')
-  assert.equal('privateRecord' in result, false)
+  assert.deepEqual(result, { publicData: true })
   assert.deepEqual(dependencies.getCallCounts(), {
-    supabase: 0,
+    supabase: 1,
     provider: 0,
     sideEffect: 0,
-    total: 0,
+    total: 1,
   })
 })

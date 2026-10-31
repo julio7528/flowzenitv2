@@ -1,58 +1,44 @@
-# Pesquisa técnica — SPEC-003 histórico, memória e checkpoints
+# Pesquisa técnica — SPEC-003@3 histórico, memória e checkpoints
 
-**Estado:** pesquisa documental Draft. Nenhuma persistência, retenção, conexão, schema, grant, package ou provedor foi escolhido ou ativado.
+**Estado**: decisão documental aprovada no escopo da SPEC; implementação depende de lote SDD exato aprovado.
 
-## Baseline do checkout
+## Verificações no checkout e supervisor (2026-10-29)
 
-- `package.json` declara React/Vite, Supabase JS e testes Node; não contém `@langchain/langgraph`, checkpointer, API de produto ou pacote de persistência conversacional. `src/` não contém histórico/chat. `src/lib/supabase.js` é cliente do browser.
-- As migrations de produto definem `public.demandas` e `public.recorrente`, não mensagens. Não há conversas, `thread_id` de agente ou memória em migrations do produto.
-- `supabase/migrations/20261028103332_sdd_governance_core.sql` cria `sdd.checkpoints` e `sdd.audit_events` para manifests, runs, tarefas e auditoria do supervisor. Essa área operacional pertence ao SDD; não é store de agente nem pode guardar conversas.
-- O baseline do produto mantém passkey apenas no browser, sem identidade server-side. DEC-001 mantém o acesso atual, mas bloqueia novas leituras privadas/ações até controle adequado ser aprovado, implementado e verificado.
-- SPEC-002 define `CheckpointPort.load(threadId)`/`save(threadId, graphVersion, checkpoint)` e `ExecutionLedger` como portas; storage e retenção pertencem a SPEC-003/DEC-005. A assinatura nominal não declara state-schema version ou turn correlation como parâmetros; o contrato desta SPEC os exige dentro do metadata/envelope serializado e requer teste de integração, sem alterar o ownership de SPEC-002.
-- A suíte atual contém `tests/dailyTimeline.test.js` e `tests/sddctl.test.js`; não encontrei testes de transcript, checkpointer LangGraph, paginação, retenção ou deleção conversacional.
+- GitHub main e checkout local apontavam para 5093e36bcd83eabbb91acb22288603deefa2f948. Checkout limpo; nenhum reset/pull/checkout foi executado.
+- Supervisor registra SPEC-001@2, SPEC-002@2 e SPEC-004@2 como COMPLETED. SPEC-003 ainda não estava registrada. Não havia lote ativo.
+- Node v24.13.0 e npm 11.6.2. Dependências instaladas: @langchain/core 1.3.1, @langchain/langgraph 1.5.3 e @supabase/supabase-js 2.118.0. LangGraph checkpoint transitive 1.2.1.
+- Supabase project ref twikxeloeftczwbpjvzr, projeto flowzenithv2, ACTIVE_HEALTHY, PostgreSQL 17.11. Schema conversation_private e agent_memory não existiam. A inspeção foi de catálogo/ACL somente, sem acessar conteúdo de tabelas de produto.
+- A pasta local não contém DATABASE_URL/CONVERSATION_DATABASE_URL. SUPABASE_SECRET_KEY é usada somente pelo cliente operacional SDD, nunca como autenticação ou acesso à memória privada.
 
-## LangGraph: persistência e memória
+## Checkpointer LangGraph
 
-O material oficial atual distingue checkpointers (snapshots de estado por thread) de stores (dados arbitrários compartilhados entre threads). Checkpointer sustenta continuidade/interrupção/fault tolerance; Store é caminho de memória durável cross-thread. Esta SPEC usa o primeiro como candidato técnico e deixa o segundo desativado porque memória semântica persistente está fora do escopo. Consulte [LangGraph persistence JS](https://docs.langchain.com/oss/javascript/langgraph/persistence), [checkpointers](https://docs.langchain.com/oss/javascript/langgraph/checkpointers), [stores](https://docs.langchain.com/oss/javascript/langgraph/stores) e [memory overview](https://docs.langchain.com/oss/javascript/concepts/memory).
+O npm metadata consultado para @langchain/langgraph-checkpoint-postgres 1.1.2 mostra ESM, Node >=18, peer @langchain/core ^1.1.44 e @langchain/langgraph-checkpoint ^1.2.0; versões instaladas satisfazem ranges. A implementação utiliza pg Pool e permite schema explícito. O pacote publicou seis migrations até a versão 1.1.2 que criam checkpoint_migrations, checkpoints, checkpoint_blobs e checkpoint_writes.
 
-A documentação explica que checkpoint é criado em fronteiras de superstep e que pending writes de nós já concluídos podem ser recuperados sem reexecutá-los em certas falhas. Resume/replay de um checkpoint pode executar novamente nós posteriores; portanto, histórico/checkpoint não garantem idempotência de side effect. SPEC-002 ExecutionLedger continua a autoridade para outcomes de tools: só retomar operação com evidência durável; ledger ambíguo bloqueia o handler.
+O método PostgresSaver.setup() cria schema e executa migrations por chamada; não será usado no runtime. A migration do produto copia as seis declarações da versão pinada, adiciona relações de lifecycle em FK e registra a versão 5. O código de runtime só usa as tabelas já migradas. Atualizar o pacote exige migration versionada e aprovação própria no SDD.
 
-### Checkpointer Postgres candidato
+O checkpointer armazena checkpoints e writes em tabelas separadas. Seu DDL não implementa TTL. A SPEC mantém checkpoint_envelopes com versões, updated_at e expires_at. O serviço valida o envelope e ledger antes de invocar o graph; exclusão remove as tabelas oficiais por thread_id.
 
-O README oficial de [`@langchain/langgraph-checkpoint-postgres`](https://github.com/langchain-ai/langgraphjs/blob/main/libs/checkpoint-postgres/README.md) documenta `PostgresSaver`, `setup()` inicial e opção de `schema` (default `public`). A instalação do pacote e o setup criam schema/DDL e estão fora deste trabalho. Recomendação para avaliação futura: testar a versão compatível com o LangGraph em database isolado e schema privado explicitamente configurado; rever/registrar migrations e upgrades em lote SDD aprovado. Nunca executar `setup()` automaticamente em toda inicialização de endpoint. Não reutilizar `sdd.checkpoints`.
+## Supabase e PostgreSQL
 
-O mesmo README informa dependência de `node-postgres`/TCP em runtime Node. Vercel Node Function, pooler Supabase, região, conexão persistente e lifespan do runtime dependem de DEC-010 e teste de integração; nenhum é selecionado aqui. `MemorySaver` fica restrito a teste porque não persiste após restart. O checkpointer Postgres e as conversas são candidatos de armazenamento, não autorização: precisam de role/credencial de runtime aprovada e gate DEC-001 antes de private access.
+O projeto usa PostgreSQL 17.11; projeto exato foi identificado por MCP. O schema escolhido é conversation_private, privado, sem grants para PUBLIC/anon/authenticated/service_role e não incluído nos exposed schemas. Supabase docs explicam que custom schemas só chegam à Data API se forem expostos e receberem grants, e que transação-pooling serve a funções serverless, com restrição a statements preparados. O runtime de produção e o pooler concreto não foram verificados; nenhum acesso de Function é ativado.
 
-### Cópia de conteúdo e separação
+O changelog atual do Supabase lista a mudança de exposição automática da Data API, com enforcement em todos os projetos em 2026-10-30. Esta SPEC não depende desse default: schema privado e revogações explícitas mantêm o isolamento. O changelog de PostgreSQL 17.11 não altera as operações usadas nesta migration.
 
-LangGraph state pode incluir mensagem e outros dados que nós precisam, enquanto uma tabela de conversa guardaria transcript visível. Se o graph mantém mensagens, os dados podem existir em ambos os stores. Isso não torna checkpoint igual ao histórico: cada artefato tem purpose, schema, query e acesso distintos. O desenho limita graph state a contexto necessário para retomar um turno e nunca usa `getState()` como endpoint de transcript. Nenhum checkpoint ou tool payload vai para audit genérico.
+Referências consultadas:
+- https://github.com/langchain-ai/langgraphjs/blob/main/libs/checkpoint-postgres/README.md
+- https://supabase.com/docs/guides/api/using-custom-schemas
+- https://supabase.com/docs/guides/database/connecting-to-postgres
+- https://supabase.com/changelog?types=breaking-change
+- https://supabase.com/changelog/postgres-15-19-17-11-breaking-changes
 
-Histórico tem mensagens user, resposta final assistant e, se necessário para exibição, somente resumo allowlisted de tool. Calls intermediárias, state interno, prompt, reasoning e resultado bruto ficam fora da resposta. Context summary é derivado por conversa com cursor/version, não memória semântica cross-thread. Os transcript messages canônicos permanecem intactos para pagination/deleção e se houver orçamento permite reconstruir contexto. O uso de resumo de conversa enviado a modelo está bloqueado por DEC-006; fixtures usam doubles.
+## Decisões preservadas
 
-## Data lifecycle e segurança
+- ConversationRepository é fonte canônica do transcript; PostgresSaver é exclusivamente estado interno do graph.
+- ExecutionLedger continua propriedade de SPEC-002. Checkpoint nunca presume side-effect concluído.
+- Summary é derivado, escopado à conversa e não altera a transcrição.
+- Nenhum LangGraph Store, vector store, embedding, memória cross-thread, provider ou trace é criado.
+- DEC-001 continua fechada. Sem autenticação server-side aprovada, IDs não autorizam consulta e todas as rotas de conversa ficam desabilitadas.
 
-- DEC-005 define retenção, exclusão, exportação e compartilhamento; não escolher TTL, grace period, legal tombstone ou purge window. Enquanto pendente, produção não persiste conversation/checkpoint/summary.
-- DEC-006 define campos que podem sair a provedores, redaction, opt-out e localização. Nenhuma transcrição real pode alimentar summarization, DeepSeek, Gemini ou LangSmith antes dessa decisão.
-- DEC-001 bloqueia endpoints privados. Thread ID, cursor e idempotency key são referências de dados/execução, não credenciais. Não usar passkey local, anon grants ou service_role como owner authorization.
-- Dados de domínio são reconsultados por SPEC-004 e mudanças por SPEC-006/007. Memória resumida/checkpoint não é fonte de verdade para status, hora ou data.
-- Auditoria persistente continua sob SPEC-010. Eventos mínimos de execução podem conter correlation/turn/thread hash, operação e outcome categorizados somente se DEC-005/010 autorizarem; não transcript nem checkpoint payload.
+## Pendências que continuam operacionais
 
-## Proposta técnica e alternativas
-
-1. **Histórico relacional próprio (proposta):** conversas e mensagens em estrutura aditiva e isolada; cursor monotônico por conversa; usado pela paginação e pelo ContextBuilder. Isso mantém o transcript canônico independente do formato interno do LangGraph.
-2. **LangGraph PostgresSaver (candidato):** usa suas tabelas/schemas internos para checkpoints e pending writes, via porta SPEC-002. Validar schema selection, driver, migrations, connection pooling, JSONB/serialization, upgrade e pruning; não compor a tabela de mensagem dentro do formato interno do package.
-3. **LangGraph Store cross-thread:** descartado para esta SPEC porque o requisito exclui memória semântica persistente entre conversas. Não instanciar `PostgresStore` nem indexar conteúdo.
-4. **MemorySaver:** apenas teste determinístico; não prova restart, isolamento concorrente ou persistência.
-5. **Checkpointer custom:** alternativa somente se `PostgresSaver` não se integrar com os limites de runtime/schema. Requer implementar interface completa (`put`, `putWrites`, `getTuple`, `list`) e rodar suite de conformance; não é caminho preferido sem evidência.
-
-## Pendências
-
-| Decisão | Mantida pendente | Capacidade bloqueada |
-|---|---|---|
-| DEC-001 | mecanismo separado de acesso adequado | endpoint/private history/checkpoint. |
-| DEC-005 | retention, exclusão, export, compartilhar, grace period e tombstone | persistência de produção e TTL/pruning. |
-| DEC-006 | provedor/fields/redaction/location | resumir/enviar transcript real a qualquer provedor/trace externo. |
-| DEC-010 | runtime, região, pool, worker e lifecycle deployment | escolha do driver/checkpointer/cleanup runtime. |
-| DEC-011/012, SPEC-002 | modelo/context window e limites de chamadas/contexto | valor numérico de contexto, compactação real e cap de payload. |
-
-O planejamento documental pode detalhar contratos e cenários sintéticos sem fechar essas decisões. Nenhum teste foi executado nem banco remoto consultado.
+A política dec005-spec003-v1 não resolve DEC-005 para outras categorias. DEC-006 impede conteúdo real em provedores. DEC-001 impede qualquer read/write privado em request. O projeto não tem configuração de conexão de runtime e a disponibilidade de scheduler não foi verificada. O escopo só pode ser testado por fixtures sintéticas e SQL administrativo diretamente vinculado ao projeto de desenvolvimento.

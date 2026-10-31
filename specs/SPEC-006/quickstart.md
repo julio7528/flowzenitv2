@@ -1,26 +1,21 @@
-# Validação futura — SPEC-006
+# SPEC-006 quickstart
 
-Este roteiro é para execução após autorização da implementação. Nada foi executado durante o planejamento. Use lote SDD aprovado, um controle separado que satisfaça a condição de acesso imposta por DEC-001 implementado/verificado e as entradas DEC-009 aprovadas que forem necessárias. Até lá, teste somente a camada de validação com doubles sintéticos, sem Supabase privado ou endpoint acessível.
+## POC validation
 
-## Pré-condições futuras
+1. Run `npm test`, focused domain-write contracts, `npm run lint`, and `npm run build`.
+2. Verify task and subtask insert shapes use fixed `public.demandas`, server-owned `tipo`/`raizid`, the existing Supabase JS client, and exact-ID read-back.
+3. Verify invalid/wrong-type parent, blank name, and a demand with `data_exec` set make zero insert calls.
+4. Verify timeout/uncertain insert results are not retried automatically and are not shown as completed.
+5. Verify no migration, grant, RLS, schema, direct `pg`, Docker, or `service_role` change was introduced.
 
-- Confirmar SPEC-001/002/004/005 compatíveis; manter DEC-001 como aprovada sem autenticação nova, e não executar reads privados nem writes até um controle de acesso separado ser aprovado, implementado e verificado; escolher/aprovar o limite transacional e o adaptador de idempotência.
-- Para testes de banco, usar projeto local/alvo isolado marcado como não produtivo, migrações exclusivamente do lote aprovado, registros sintéticos e limpeza delimitada.
-- Usar somente matriz DEC-009 sintética em testes de ramo. Não converter fixture em configuração de produção.
-- Manter o gate DEC-001 fechado e provar zero chamadas ao repositório quando o gate faltar.
+Use deterministic PostgREST doubles in these automated checks. Record actual outcomes in the active SDD gates.
 
-## Cenários de verificação futuros
+## Recorded validation — 2026-10-30
 
-1. `npm test`: validar DTOs estritos, IDs bigint como string decimal, nome não vazio após trim, tipos/pais, enum de status e rejeição de campos extras.
-2. Criar demanda, tarefa e subtarefa sintéticas; confirmar tipo/pai e IDs persistentes; usar IDs inexistente e pai de tipo incorreto para provar zero efeitos.
-3. Criar tarefa sob demanda semanal; o preview/outcome deve listar a data do pai que será limpa. Alterar o pai entre preview e confirmação deve retornar conflito sem write.
-4. Mover tarefa na mesma semana e para outra semana/backlog; comparar exatamente a lista de filhos que o trigger limpa, incluindo datas e horários. Alterar um filho antes de executar deve invalidar a confirmação antiga.
-5. Atualizar status válido de subtarefa; tentar escrever status direto em tarefa/demanda e status inválido; verificar status dos pais lido do banco após o trigger.
-6. Testar planejamento semanal para demanda sem tarefa, tarefa, demanda com tarefa e subtarefa; tentativa inválida não pode alterar linhas.
-7. Testar planejamento diário com agenda completa, todos os campos nulos, campos parcialmente nulos, data fora da semana e `hora_inicio >= hora_fim`. Confirmar que overlaps válidos permanecem sem deslocar outros registros.
-8. Concorrer dois comandos com mesmo idempotency key/hash, repetir após outcome persistido e tentar chave igual com hash diferente. Provar no máximo um efeito, outcome anterior para replay e conflito para hash diferente.
-9. Simular indisponibilidade e timeout antes/depois do commit; consultar ledger antes de decidir qualquer retry e nunca responder `COMMITTED` sem leitura de volta confirmada.
-10. Provar que gate DEC-001 fechado, policy/confirmation ausente, grant inválido ou ledger indisponível produzem zero efeito.
-11. Executar `npm run lint`, `npm run build` e `npm test`; para gate de banco, registrar comando/target isolado, resultado e evidência sem dados sensíveis.
-
-Registrar cada gate como `PASS`, `FAIL` ou `NOT VERIFIED` com comando e resultado real. Este quickstart não aprova implantação, grants, provider ou ação privilegiada.
+- `npm.cmd test`: PASS, exit 0; 417 tests, 414 passed, 3 skipped, 0 failed.
+- `$files = @(rg --files tests/contracts/domain-write tests/security/domain-write tests/unit/domain-write tests/unit/guardrails tests/security/guardrails | Where-Object { $_.EndsWith('.test.js') } | Sort-Object); node --test $files`: PASS, exit 0; 111 passed, 0 failed.
+- `npm.cmd run lint`: PASS, exit 0 (`oxlint`).
+- `npm.cmd run build`: PASS, exit 0; Vite 8.3.5 transformed 165 modules.
+- Production route contract: mocked DeepSeek plus intercepted Supabase JS Data API; parent GET, one task POST, and exact-ID read-back GET. No live application rows were written.
+- `node scripts/security/scan-client-assets.js dist` with a process-only synthetic sentinel: PASS; 22 built files scanned, no sentinel match. Restricted server-only markers had 0 hits.
+- `git diff --check`: PASS, exit 0. SPEC-006 added no migration, grant, RLS policy, trigger, table, or database permission change.

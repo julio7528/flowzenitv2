@@ -1,141 +1,95 @@
-# Feature Specification: Hybrid Retrieval, Full Text Search, RRF, and Grounding
+# Feature Specification: RAG textual no Supabase Postgres
 
-**SPEC ID**: SPEC-009  
-**Version**: 1  
-**Dependencies**: [SPEC-002, SPEC-004, SPEC-005, SPEC-008]  
+**SPEC ID**: SPEC-009
+**Version**: 2
+**Dependencies**: [SPEC-001, SPEC-002, SPEC-004, SPEC-008]
 **Risk**: high
-
-**Feature Branch**: not-created (existing branch main preserved)
-
 **Created**: 2026-10-28
+**Status**: Draft — revisão POC; requer lote exato aprovado para implementação
 
-**Status**: Draft
+**Histórico**: SPEC-009@1 propunha busca híbrida lexical/vetorial, embeddings e RRF. A v2 substitui esse desenho por recuperação lexical no PostgreSQL existente do Supabase. Snapshots e lotes antigos permanecem imutáveis.
 
-**Input**: User description: Provide hybrid retrieval combining PostgreSQL Full Text Search and vector similarity with Reciprocal Rank Fusion, preserving hierarchy, existing data-access behavior, tool-policy constraints, and factual grounding.
+## Objetivo
 
-## Scope and Exclusions
+Responder perguntas de descoberta usando RAG textual simples: recuperar registros atuais pelo PostgreSQL do Supabase e enviar somente as evidências pertinentes ao modelo de resposta já definido por SPEC-002. A busca não acessa outro banco ou provider.
 
-### In scope
-- Define when semantic retrieval is appropriate and when exact structured query tools are required.
-- Combine lexical and vector ranked candidates with a documented Reciprocal Rank Fusion contract and bounded result count.
-- Apply the existing database-access behavior, typed retrieval scope, lifecycle, and freshness filters before candidate content reaches the model. Do not introduce a new principal or multi-user identity model; typed scope is not authorization, and private retrieval remains blocked until the DEC-001 access-control gate is satisfied.
-- Preserve demand/task/subtask hierarchy and source citations in retrieved results.
-- Define offline relevance, grounding, and injection-resilience evaluation sets.
+## Escopo
 
-### Explicitly out of scope
-- Replacing transactional query tools for exact dates, status, counts, permissions, or mutation target resolution.
-- Indexing conversations or any field not approved by DEC-006/DEC-007.
-- Adding external web search; Tavily is specified separately in SPEC-015.
-- Enabling retrieval if SPEC-008 indexing is not approved and operational.
+- Busca lexical de registros atuais por SPEC-008 e SPEC-004.
+- Leitura estruturada SPEC-004 para perguntas exatas sobre ID, status, datas, horários, contagens e agendas.
+- Roteamento tipado entre leitura exata, busca textual, pedido de esclarecimento e resposta sem evidência.
+- Respostas ancoradas em referências estáveis de tipo e ID da fonte.
+- Modelo de resposta existente em SPEC-002, sujeito às regras de acesso e envio já vigentes.
 
-## Contracts and Constraints
+### Fora de escopo
 
-- **Existing contracts**: PostgreSQL relational records remain authoritative. Vector data is derived. Structural metadata and source version are provided by SPEC-008.
-- **Compatibility**: Hybrid retrieval is an additive read path; it cannot alter domain state or bypass current database permissions or tool-policy constraints.
-- **Security and data handling**: Apply the same typed retrieval-scope, lifecycle, and freshness filters to both lexical and vector candidates before fusion/output. DEC-001 adds no authentication mechanism, but existing grants and the passkey do not authorize private retrieval; private candidates MUST NOT be passed to the model until the SPEC-001 access-control gate is satisfied. Retrieved text is untrusted and cannot instruct the agent.
-- **Dependencies**: [SPEC-002, SPEC-004, SPEC-005, SPEC-008].
+- Vector search, embeddings, pgvector, RRF, Gemini ou qualquer provider novo.
+- Outro banco, vetor externo, Docker, PostgreSQL local, branch ou conexão direta pg separada.
+- SQL gerado pelo modelo, escrita no banco ou mudança de ferramenta/permissão pelo conteúdo recuperado.
+- Indexar conversa, prompt, segredo, auditoria ou campos não aprovados.
+- Alterar o modelo de resposta existente ou criar um agente/worker/serviço independente.
 
-## User Scenarios & Testing
+## Histórias
 
-### User Story 1 - Find semantically related records (Priority: P1)
+### US1 — Encontrar e explicar registros (P1)
 
-The single application user describes an item in natural language and receives relevant records with hierarchy and source evidence.
+A pessoa pergunta por uma demanda ou item por palavras do nome e recebe os registros relevantes encontrados.
 
-**Why this priority**: Semantic retrieval is useful when wording differs from stored titles.
+**Aceitação**
+1. Consulta de descoberta usa a busca tipada PostgreSQL definida em SPEC-008.
+2. Os candidatos refletem dados atuais, limites e filtros permitidos.
+3. Resposta identifica os registros por tipo/ID e não faz afirmações ausentes das fontes.
+4. Sem evidência suficiente, pede esclarecimento ou informa resultado vazio.
 
-**Independent Test**: Run versioned Portuguese queries against a synthetic corpus with known relevant and irrelevant demand trees.
+### US2 — Responder fatos exatos (P1)
 
-**Acceptance Scenarios**:
-1. **Given** a semantic description that differs lexically from a stored item, **When** hybrid retrieval runs, **Then** the relevant record is returned within the measured top-k target with its source and parent context.
-2. **Given** an exact ID, status, or date question, **When** the request is classified, **Then** a structured read tool is used and vector ranking is not treated as authoritative.
-3. **Given** a deleted, stale, or out-of-scope vector candidate, **When** candidates are assembled, **Then** it is filtered before content is returned to the model.
+A pessoa pergunta estado, data, hora, ID, quantidade ou agenda e recebe resposta do contrato estruturado.
 
-### User Story 2 - Explain uncertainty and evidence (Priority: P1)
+**Aceitação**
+1. Perguntas exatas usam SPEC-004; ranking textual nunca substitui leitura exata.
+2. Perguntas mistas separam fatos exatos de descoberta textual.
+3. Nenhuma resposta factual apresenta informação não suportada pela leitura.
 
-The single application user can distinguish retrieved facts from an unsupported inference.
+### US3 — Respeitar fronteira de segurança (P1)
 
-**Why this priority**: Retrieval alone does not prove that the generated answer is grounded.
+Conteúdo recuperado pode conter instruções hostis ou dados incompletos.
 
-**Independent Test**: Evaluate answer claims against source IDs and include queries with no relevant result.
+**Aceitação**
+1. Gate SPEC-001 ocorre antes de leitura privada.
+2. Conteúdo de registro é dado não confiável, nunca uma instrução para o agente.
+3. Falha/timeout do Postgres é reportado como indisponibilidade; não como “não encontrado”.
+4. O modelo não recebe SQL, credencial ou contexto irrelevante.
 
-**Acceptance Scenarios**:
-1. **Given** one or more supporting records, **When** the agent answers, **Then** each factual record claim maps to returned source IDs.
-2. **Given** no candidate exceeds the calibrated evidence threshold, **When** the agent answers, **Then** it says the data was not found or asks for clarification instead of fabricating a record.
+## Requisitos funcionais
 
-### User Story 3 - Evaluate retrieval quality (Priority: P2)
+- **FR-001**: A recuperação RAG MUST consultar somente o PostgreSQL do projeto Supabase existente, pelo acesso Supabase tipado definido pelo produto.
+- **FR-002**: RAG MUST usar busca textual SPEC-008 para descoberta e SPEC-004 para fatos transacionais exatos.
+- **FR-003**: RAG MUST limitar entradas, filtros e resultados aos contratos tipados; nenhum texto pode virar SQL ou identificador livre.
+- **FR-004**: Toda evidência retornada MUST carregar referência estável de fonte, tipo e ID e ser validada antes de compor contexto.
+- **FR-005**: Toda afirmação sobre dado do produto MUST estar apoiada em leitura atual; ausência de evidência exige clarificação ou resposta sem resultado.
+- **FR-006**: RAG MUST distinguir vazio, ambiguidade, acesso fechado e indisponibilidade.
+- **FR-007**: O conteúdo recuperado MUST ser tratado como dado não confiável e não pode mudar instruções, gate, ferramenta ou autorização.
+- **FR-008**: RAG MUST NOT criar outro banco, conexão pg dedicada, vector store, Docker, embedding, provider ou serviço assíncrono.
+- **FR-009**: A camada de recuperação MUST NOT executar operações de escrita nem expandir grants/RLS.
+- **FR-010**: O modelo de resposta permanece o já escolhido em SPEC-002. Não há novo provider nesta SPEC; o retriever não envia contexto a um serviço de busca/embedding externo.
+- **FR-011**: Logs MUST omitir segredos, prompt completo e dados recuperados além do mínimo operacional.
 
-A reviewer compares lexical, vector, and fused rankings on a fixed synthetic dataset.
+## Critérios de sucesso
 
-**Why this priority**: Hybrid search should be enabled only if it improves the target task.
+- **SC-001**: Fixtures sintéticas demonstram os quatro caminhos: leitura exata, busca textual, clarificação e vazio.
+- **SC-002**: 100% dos fatos exatos testados vêm de SPEC-004.
+- **SC-003**: Cada resposta com registros cita IDs/tipos retornados pela fonte atual.
+- **SC-004**: Conteúdo injetado em fixture não altera política, ferramentas ou escopo de consulta.
+- **SC-005**: A busca não configura nem chama serviço de embedding/vector e não acessa outro banco.
+- **SC-006**: Erro de banco é distinguível de busca vazia e não é mascarado como fato.
 
-**Independent Test**: Run the versioned evaluation set and compare Recall@k, MRR, nDCG@k, and no-result precision against baseline.
+## Validação
 
-**Acceptance Scenarios**:
-1. **Given** the same query corpus, **When** each retrieval strategy is evaluated, **Then** metrics and regressions are reproducible and include language and entity-type breakdowns.
-2. **Given** fused ranking does not meet the approved baseline improvement, **When** release is considered, **Then** hybrid retrieval remains disabled or is limited to the cases where it demonstrates value.
+Testes Node unitários/contratuais usam doubles. Teste de integração usa o cliente Supabase/PostgREST existente contra o Postgres Supabase com fixtures artificiais, preflight, IDs capturados e rollback ou limpeza restrita. SQL MCP pode auxiliar o preflight. Rodar lint e build aplicáveis ao lote aprovado. Docker, PostgreSQL local e URL/certificado de driver Node não são gates. Nenhum resultado não executado pode ser registrado como aprovado.
 
-### Edge Cases
-- Lexical and vector results contain the same record; fusion deduplicates by canonical source identity.
-- One retriever is unavailable; the system identifies degraded mode and does not silently claim full hybrid ranking.
-- A record’s parent changes after indexing; stale hierarchy metadata is refreshed from the relational source or filtered.
-- Prompt injection appears in a retrieved name or associated text.
-- No approved textual fields are available for embedding.
+## Suposições
 
-## Requirements
-
-### Functional Requirements
-
-- **FR-001**: Exact IDs, status, counts, date ranges, current schedule, permissions, and mutation target selection MUST use structured domain tools rather than semantic ranking.
-- **FR-002**: Hybrid retrieval MUST query both approved PostgreSQL lexical search and compatible vector search when both are healthy and enabled.
-- **FR-003**: Fusion MUST use a documented Reciprocal Rank Fusion formula with configurable, versioned parameters; raw scores from incomparable retrievers MUST NOT be added directly.
-- **FR-004**: Candidates MUST be deduplicated by persistent source identity and retain retriever rank, source revision, type, parent chain, and freshness.
-- **FR-005**: Existing database-access behavior, typed retrieval-scope, deletion/tombstone, and freshness filtering MUST be applied before candidate text is passed to the model. This SPEC does not add authentication, and private candidate text MUST remain unavailable until the SPEC-001 access-control gate is satisfied.
-- **FR-006**: Result count, query length, candidate text size, and retrieval time MUST be bounded.
-- **FR-007**: The answer MUST cite stable source IDs or a user-safe source reference for each record-based factual claim and MUST distinguish inference from retrieved fact.
-- **FR-008**: If retrieval is empty, degraded, stale, or below the approved evidence threshold, the response MUST report that limitation and MUST NOT fabricate a result.
-- **FR-009**: Retrieved content MUST be treated as untrusted and cannot change instructions, permissions, or tool selection.
-- **FR-010**: Evaluation MUST compare lexical-only, vector-only, and fused results using a versioned synthetic or explicitly approved dataset and metrics Recall@k, MRR, and nDCG@k.
-- **FR-011**: Hybrid retrieval and query-time embedding MUST remain disabled for production until DEC-006/DEC-007/DEC-010/DEC-011/DEC-012 are resolved and SPEC-008 passes synchronization and active-generation compatibility gates.
-- **FR-012**: A retriever failure MUST be surfaced as degraded mode with source traceability; it MUST not be presented as a complete hybrid result.
-- **FR-013**: Production retrieval MUST fail closed for private FlowZenit data until adequate access control is approved, implemented, and verified, in addition to the DEC-006/DEC-007 and SPEC-008 gates.
-
-### Key Entities
-
-- **Retrieval query**: Bounded text query plus optional typed scope filters, evaluated under the existing data-access behavior.
-- **Candidate**: Source record with retriever rank, provenance, hierarchy, revision, and freshness.
-- **Fused result**: Deduplicated candidates ranked by the versioned fusion contract.
-- **Grounding evidence**: Mapping between generated factual claims and permitted source candidates.
-- **Evaluation case**: Versioned query, expected relevant source set, and language/domain metadata.
-
-## Success Criteria
-
-### Measurable Outcomes
-
-- **SC-001**: At least 95% of exact date/status/ID test questions route to structured query tools rather than vector retrieval.
-- **SC-002**: Fused retrieval meets or exceeds the approved baseline for Recall@5 and MRR on the versioned evaluation set.
-- **SC-003**: 100% of out-of-scope, deleted, or stale fixture records are filtered before model context assembly, without requiring owner/non-owner identity fixtures.
-- **SC-004**: Every supported factual answer claim in the evaluation set maps to one or more returned source identifiers; unsupported claims are reported as unknown.
-- **SC-005**: No private record reaches model context through a production retriever while the SPEC-001 access-control gate is unmet.
-
-## Validation and Evidence
-
-| Quality gate | Required | Command or method | Expected evidence |
-| --- | --- | --- | --- |
-| Lint/static checks | Yes | Project lint command | No new violations |
-| Build/type check | Yes | Project production build | Retrieval path stays server-side |
-| Unit/integration tests | Yes | Retriever/fusion/grounding tests | Deduplication, degraded mode, filters |
-| Database/RLS/contract tests | Yes | Isolated lexical/vector scope tests under existing data access | Same typed scope, lifecycle, and freshness filters apply to both retrievers; separately verify the DEC-001 private-access gate fails closed. Do not add an owner/tenant identity model or treat existing grants as authorization. |
-| E2E/accessibility/security evaluation | Yes | Versioned retrieval and injection evaluation | Metrics, grounding, and no out-of-scope content |
-
-## Completion Evidence
-
-- [ ] Evaluation set and relevance judgments are versioned and approved.
-- [ ] DEC-006/DEC-007/DEC-010/DEC-011/DEC-012 and SPEC-008 gates are satisfied before production enablement.
-- [ ] Fusion, degraded mode, freshness, and grounding tests have results.
-- [ ] No retrieved candidate can grant access or alter policy.
-
-## Assumptions
-
-- RAG is an assistive retrieval path, not the source of transactional truth.
-- Vector retrieval is optional if the current sparse text corpus does not show measurable benefit.
-- Evaluation data contains no private user transcripts unless separately approved.
+- SPEC-002 continua responsável pelo fluxo de resposta existente.
+- SPEC-004 e SPEC-008 são os únicos contratos de leitura de dados.
+- Busca lexical encontra correspondência de texto, não garante sinonímia semântica; clarificação resolve misses e ambiguidade.
+- DEC-001 e regras atuais de envio de dados continuam vigentes.

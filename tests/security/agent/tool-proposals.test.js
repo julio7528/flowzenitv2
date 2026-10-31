@@ -110,10 +110,21 @@ test('unknown and malformed proposals are rejected before any handler runs', asy
   );
 });
 
-test('production default-deny policy prevents a valid proposal from reaching a handler', async () => {
+test('the owner-approved production POC policy permits an existing typed read handler', async () => {
   const harness = createHarness({ capabilityPolicy: productionCapabilityPolicy });
 
-  await assertDeniedWithoutHandler(harness, validProposal(), 'capability_disabled');
+  const result = await harness.executor.execute({
+    proposal: validProposal(),
+    context: harness.context,
+    budget: harness.budget,
+    signal: new AbortController().signal,
+  });
+
+  assert.deepEqual(result, {
+    status: 'executed',
+    result: { itemId: 'synthetic-item-1', source: 'synthetic' },
+  });
+  assert.equal(harness.getHandlerCalls(), 1);
 });
 
 test('capability is re-evaluated immediately before execution', async () => {

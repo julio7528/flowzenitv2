@@ -7,18 +7,21 @@ const DENIED_CAPABILITY = Object.freeze({
 });
 
 /**
- * SPEC-001 keeps private agent capabilities disabled until a separately
- * approved and verified server-side access control exists. Browser state,
- * request fields, and runtime flags cannot change this result.
+ * The owner-selected POC decision is public and fixed on the server. This
+ * opens the existing typed agent path without adding database privileges:
+ * Supabase's current anon grants and RLS remain the final data boundary.
+ * Browser state, request fields, and model output cannot change this decision.
  */
 export function isAgentAccessGateOpen() {
-  return false;
+  return true;
 }
 
 /**
- * Denies every current protected operation before its callback can run.
- * The arguments are intentionally ignored; this module has no opt-in path.
+ * Runs only a server-owned operation callback. This gate does not create a
+ * Supabase client, grant database permissions, or interpret request data.
+ * Callers remain responsible for dispatching only registered typed operations.
  */
-export function withAgentAccess(_request, _operation) {
-  return DENIED_CAPABILITY;
+export function withAgentAccess(_request, operation) {
+  if (typeof operation !== 'function') return DENIED_CAPABILITY;
+  return operation();
 }

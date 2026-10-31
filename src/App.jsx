@@ -22,6 +22,7 @@ const PlanejamentoDiarioPage = lazy(() => import('./pages/PlanejamentoDiarioPage
 const RecorrentesPage = lazy(() => import('./pages/RecorrentesPage.jsx'))
 const KanbanPage = lazy(() => import('./pages/KanbanPage.jsx'))
 const PomodoroPage = lazy(() => import('./pages/PomodoroPage.jsx'))
+const ChatPage = lazy(() => import('./pages/ChatPage.jsx'))
 
 const ACCESS_CODE = '52345232'
 const ACCESS_STORAGE_KEY = 'flowzenit-internal-access'
@@ -178,6 +179,7 @@ function InternalLayout() {
   const [menuOpen, setMenuOpen] = useState(false)
   const navigation = [
     { path: '/interno', label: 'Início', end: true },
+    { path: '/interno/chat', label: 'Chat' },
     { path: '/interno/demandas', label: 'Demandas' },
     { path: '/interno/recorrentes', label: 'Recorrentes' },
     { path: '/interno/planejamento-semanal', label: 'Semanal' },
@@ -189,7 +191,7 @@ function InternalLayout() {
   const dateSearch = sourceIsDaily && /^\d{4}-\d{2}-\d{2}$/.test(selectedDate ?? '') ? `?data=${selectedDate}` : ''
 
   useEffect(() => {
-    const titles = { '/interno': 'Início', '/interno/demandas': 'Demandas', '/interno/recorrentes': 'Recorrentes', '/interno/planejamento-semanal': 'Planejamento semanal', '/interno/planejamento-diario': 'Planejamento diário', '/interno/kanban': 'Kanban diário', '/interno/pomodoro': 'Pomodoro' }
+    const titles = { '/interno': 'Início', '/interno/chat': 'Chat', '/interno/demandas': 'Demandas', '/interno/recorrentes': 'Recorrentes', '/interno/planejamento-semanal': 'Planejamento semanal', '/interno/planejamento-diario': 'Planejamento diário', '/interno/kanban': 'Kanban diário', '/interno/pomodoro': 'Pomodoro' }
     document.title = `${titles[location.pathname] ?? 'Área interna'} | FlowZenit`
   }, [location.pathname])
 
@@ -269,6 +271,14 @@ function App() {
                 <InicioPage />
               </Suspense>
             )} />
+            <Route
+              path="chat"
+              element={(
+                <Suspense fallback={<div className="planning-state" role="status">Carregando chat…</div>}>
+                  <ChatPage />
+                </Suspense>
+              )}
+            />
             <Route path="demandas" element={(
               <Suspense fallback={<div className="planning-state" role="status">Carregando demandas…</div>}>
                 <DemandasPage />

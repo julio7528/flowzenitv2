@@ -1,6 +1,12 @@
 import { ToolProposalSchema, TrustedTurnContextSchema } from '../runtime/state.js';
 import { RUNTIME_LIMITS } from '../runtime/limits.js';
 import { productionCapabilityPolicy } from '../runtime/capabilities.js';
+import {
+  AGENT_TOOL_NAMES,
+  SPEC006_WRITE_TOOL_NAMES,
+  SPEC007_RECURRENCE_TOOL_NAMES,
+} from '../runtime/state.js';
+import { productionPocActionPolicy } from '../guardrails/policy.js';
 import { runSyntheticEffectWithLedger } from '../persistence/ports.js';
 import { assertServerOnlyRuntime } from '../runtime/server-only.js';
 
@@ -16,13 +22,10 @@ const DENIED = Object.freeze({
   dependency_failure: Object.freeze({ status: 'failed', reason: 'dependency_failure' }),
 });
 
-const TOOL_NAMES = new Set([
-  'getHierarchy',
-  'getItemById',
-  'searchItems',
-  'getDailySchedule',
-  'getWeeklyAllocation',
-  'getRoutineTemplates',
+const TOOL_NAMES = new Set(AGENT_TOOL_NAMES);
+const POC_CREATE_TOOL_NAMES = new Set([
+  ...SPEC006_WRITE_TOOL_NAMES,
+  ...SPEC007_RECURRENCE_TOOL_NAMES,
 ]);
 const PREINVOKE_CANCELLED = Symbol('pre-invocation-cancelled');
 const PREINVOKE_TIMEOUT = Symbol('pre-invocation-timeout');
@@ -213,14 +216,16 @@ function makeTimeoutSignal(parentSignal, timeoutMs) {
 export function createToolExecutor({
   registry,
   capabilityPolicy = productionCapabilityPolicy,
+  actionPolicy = productionPocActionPolicy,
   clock = Date,
 } = {}) {
   if (!(registry instanceof Map) || typeof capabilityPolicy !== 'function'
+    || !actionPolicy || typeof actionPolicy.evaluate !== 'function'
     || !clock || typeof clock.now !== 'function') {
-    throw new TypeError('A server-side tool registry, policy, and clock are required.');
+    throw new TypeError('A server-side tool registry, policy, action policy, and clock are required.');
   }
 
-  async function execute({ proposal: rawProposal, context: rawContext, budget, signal } = {}) {
+  async function execute({ proposal: rawProposal, context: rawContext, actionContext, budget, signal } = {}) {
     if (!isAbortSignal(signal)) return DENIED.invalid_proposal;
     if (signal?.aborted) return DENIED.cancelled;
 
@@ -275,6 +280,24 @@ export function createToolExecutor({
 
     if (!await evaluateCapability(capabilityPolicy, context, proposal)) {
       return DENIED.capability_disabled;
+    }
+
+    if (POC_CREATE_TOOL_NAMES.has(proposal.toolName)) {
+      let actionDecision;
+      try {
+        actionDecision = await actionPolicy.evaluate({
+          operationName: proposal.toolName,
+          operationVersion: entry.version,
+          arguments: input,
+        }, actionContext);
+      } catch {
+        return DENIED.capability_disabled;
+      }
+      if (actionDecision?.outcome !== 'ALLOW') {
+        return actionDecision?.outcome === 'REQUIRE_CLARIFICATION'
+          ? DENIED.invalid_proposal
+          : DENIED.capability_disabled;
+      }
     }
     if (signal?.aborted) return DENIED.cancelled;
     const invocationNow = readClock(clock);
